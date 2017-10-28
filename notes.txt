@@ -1,0 +1,1 @@
+-Note that the loss function is log loss. So, this is like the fast.ai comp... you DO NOT want to submit ones and zeroes. Kaggle could automatically fix that, but adding a little extra padding can help substantially.
