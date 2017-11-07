@@ -18,6 +18,7 @@ from keras.models import load_model
 from keras.preprocessing.image import ImageDataGenerator
 from keras.backend.tensorflow_backend import set_session
 from keras.callbacks import ModelCheckpoint
+from keras.optimizers import SGD
 
 import numpy as np
 import scipy
@@ -25,12 +26,17 @@ import pandas as pd
 import cv2
 import sys
 import os
+from pyevtk.hl import gridToVTK
+
+from unet_3d import unet_model_3d, dice_coef, dice_coef_loss
 
 TEST_FILE_PATH = "stage1_a3d/0a27d19c6ec397661b09f7d5998e0b14.a3d"
 SUBJECT_LABELS_PATH = "labels/stage1_labels.csv"
-INPUT_SHAPE = (256, 256, 132, 1)
+INPUT_SHAPE = (128, 128, 128, 1)
 SAE_PATH = "weights/best_sae.h5"
 CNN_PATH = "weights/best_cnn.h5"
+UNET_PATH = "weights/best_unet.h5"
+
 
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
@@ -302,7 +308,6 @@ def get_cnn():
     print (model.summary())
     return model
 
-
 def get_subject_labels():
     infile = SUBJECT_LABELS_PATH
     df = pd.read_csv(infile)
@@ -312,27 +317,109 @@ def get_subject_labels():
     df = df[['Subject', 'Zone', 'Probability']]
     return df
 
-#data generator
+def save_to_vtk(data, filepath):
+    """
+    save the 3d data to a .vtk file. 
+    
+    Parameters
+    ------------
+    data : 3d np.array
+        3d matrix that we want to visualize
+    filepath : str
+        where to save the vtk model, do not include vtk extension, it does automatically
+    """
+    x = np.arange(data.shape[0]+1)
+    y = np.arange(data.shape[1]+1)
+    z = np.arange(data.shape[2]+1)
+    gridToVTK(filepath, x, y, z, cellData={'data':data.copy()})
 
+def make_mask(xyz_list, data, filename):
+    mask = np.array(np.zeros((128, 128, 128)))
+    for xyz in xyz_list:
+        xs = xyz[0]
+        ys = xyz[1]
+        zs = xyz[2]
+        for x in range(xs[0], xs[1]):
+            for y in range(ys[0], ys[1]):
+      	        for z in range(zs[0], zs[1]):
+    	            mask[x][y][z] = 1.0
+    masked_data = np.multiply(mask, data)
+    save_to_vtk(masked_data, "vtk_files/{}_mask".format(filename))
+    print ('inside shape:')
+    print (masked_data.shape)
+    return masked_data
+
+def unet_mask(data, filename):
+    if filename == "0097503ee9fa0606559c56458b281a08.a3d":
+        masked_data = make_mask([((0, 50), (0, 127), (4, 15))], data, filename)
+        return masked_data
+    elif filename == "adabe77c4e98d47595fcae9e0b8a6d78.a3d":
+        masked_data = make_mask([((77, 127), (0,127), (98, 114)), ((0, 63), (63, 82), (65, 78))], data, filename)
+        return masked_data
+    elif filename == "00360f79fd6e02781457eda48f85da90.a3d":
+        masked_data = make_mask([((72, 127), (60, 96), (13, 26))], data, filename)
+        return masked_data
+    elif filename == "0043db5e8c819bffc15261b1f1ac5e42.a3d":
+        masked_data = make_mask([((72, 127), (60, 96), (13, 26)), ((55,73), (49, 70), (39, 54)),
+            ((0, 39), (64, 86), (80, 94))], data, filename)
+        return masked_data
+    elif filename == "0050492f92e22eed3474ae3a6fc907fa.a3d":
+        masked_data = make_mask([((75, 94), (68, 79), (2, 14)), ((31, 50), (52, 90), (28, 43)),
+            ((79, 115), (60, 75), (87, 99))], data, filename)
+        return masked_data
+    elif filename == "011516ab0eca7cad7f5257672ddde70e.a3d":
+        masked_data = make_mask([((13, 41), (58, 71), (87, 100))], data, filename)
+        return masked_data
+    else: 
+        return None
+
+def test_unet_mask(filename):
+    print ("testing...")
+    filedata = read_data('stage1_a3d/{}'.format(filename))
+    #data = np.reshape(filedata, (512, 512, 660, 1))
+    scaled_data = scipy.ndimage.zoom(filedata, (0.25, 0.25, 0.194))
+    unet_mask(scaled_data, filename)
+    #save_to_vtk(filedata, filename.split('.')[0])
+
+def subtract_3d(filename):
+    filedata = read_data('stage1_a3d/{}'.format(filename))
+    data1 = scipy.ndimage.zoom(filedata, (0.25, 0.25, 0.194))
+    data2 = data1
+    data3 = np.zeros((128, 128, 128))
+    for x in range(0, 127):
+        for y in range(0, 127):
+            for z in range(0, 127):
+                data3[x][y][z] = data1[x][y][z] - data2[127-x][y][z]
+    data = np.clip(data3, 0, 1)
+    save_to_vtk(data, "vtk_files/{}_subtracted".format(filename))
+
+
+
+#print ("ok")
+
+#subtract_3d("adabe77c4e98d47595fcae9e0b8a6d78.a3d")
+
+
+#data generator
 def generator(sae):
     dir_path='stage1_a3d'
     image_names = os.listdir(dir_path)
     labels = get_subject_labels()
     if sae is False:
         image_names = list(set(labels["Subject"].values.tolist()))
-        """        image_names = [
-            'NO - 00360f79fd6e02781457eda48f85da90',
-            'NO - 0043db5e8c819bffc15261b1f1ac5e42',
-            'NO - 0050492f92e22eed3474ae3a6fc907fa',
+        image_names = [
+            '00360f79fd6e02781457eda48f85da90',
+            '0043db5e8c819bffc15261b1f1ac5e42',
+            '0050492f92e22eed3474ae3a6fc907fa',
             '006ec59fa59dd80a64c85347eef810c7',
-            '0097503ee9fa0606559c56458b281a08']
-        """
+            '0097503ee9fa0606559c56458b281a08',
+            '011516ab0eca7cad7f5257672ddde70e']   
         for i in range(0, len(image_names)):
             image_names[i] = image_names[i] + ".a3d"
 
 #    np.random.shuffle(image_names)
 #    image_names = image_names[:10]
-    batch_size = 10
+    batch_size = 1
 
     zone_map = {
         1: 2, 2: 2, 3:3, 4:3, 11:4, 13:4, 15:4, 12:5, 14:5, 16:5,
@@ -360,11 +447,15 @@ def generator(sae):
                             zone = int(zone[4:])
                             mapped_zone = zone_map[zone]
                             y[mapped_zone-1] = 1
-                    y_batch.append(y)                            
-                filedata = read_data(dir_path + '/{}'.format(filename))
 
+                    #y_batch.append(y)                            
+                filedata = read_data(dir_path + '/{}'.format(filename))
+               
                 data = np.reshape(filedata, (512, 512, 660, 1))
-                x_batch.append(scipy.ndimage.zoom(data, (0.5, 0.5, 0.2, 1)))
+                scaled_data = scipy.ndimage.zoom(data, (0.5, 0.5, 0.5, 1))
+                #add unet mask instead of y 
+                y_batch.append(unet_mask(scaled_data, filename))
+                x_batch.append(scaled_data)
 
 
             x_batch = np.array(x_batch)
@@ -386,7 +477,7 @@ def load_data():
         print ("start one")
         filedata = read_data(dir_path + '/' + image_name) 
         data = np.reshape(filedata, (512, 512, 660, 1))
-        x.append(scipy.ndimage.zoom(data, (0.5, 0.5, 0.2, 1)))
+        x.append(scipy.ndimage.zoom(data, (0.5, 0.5, 0.5, 1)))
     x = np.array(x)
     print (x.shape)
     return x
@@ -396,10 +487,52 @@ def load_data():
 sae_checkpoint = ModelCheckpoint(SAE_PATH, monitor='loss', verbose=1, save_best_only=True, mode='min')
 cnn_checkpoint = ModelCheckpoint(CNN_PATH, monitor='loss', verbose=1, save_best_only=True, mode='min')
 
-#log = get_sae().fit_generator(generator=generator(True), steps_per_epoch = 200, epochs = 1000, verbose=2, callbacks=[sae_checkpoint])
+def test_unet():
+    print("running unet")
+    model = unet_model_3d(INPUT_SHAPE)
+    model.load_weights(UNET_PATH)#"weights/1_mask.h5")#UNET_PATH)
+    model.compile(optimizer=SGD(lr=0.001), loss=dice_coef_loss, metrics=[dice_coef, 'acc'])
+    features = []
+    labels = []
+    image_names = [
+            '00360f79fd6e02781457eda48f85da90.a3d',
+            '0043db5e8c819bffc15261b1f1ac5e42.a3d',
+            '0050492f92e22eed3474ae3a6fc907fa.a3d',
+            'adabe77c4e98d47595fcae9e0b8a6d78.a3d',
+            '0097503ee9fa0606559c56458b281a08.a3d',
+            '011516ab0eca7cad7f5257672ddde70e.a3d']   
+ 
+    for filename in image_names:
+        data = read_data('stage1_a3d/{}'.format(filename))
+        scaled_data = scipy.ndimage.zoom(data, (0.25, 0.25, 0.194))
+        mask = unet_mask(scaled_data, filename)
+        x = np.reshape(scaled_data, (128, 128, 128, 1))
+        print(mask.shape)
+        y = np.reshape(mask, (128, 128, 128, 1))
+        y = y > 0.1 
+        features.append(x)
+        labels.append(y)
+
+    unet_checkpoint = ModelCheckpoint(UNET_PATH, monitor='loss', verbose=1, save_best_only=True, mode='min')
+
+    """print ("predicting")
+    predictions = model.predict(np.asarray(features), batch_size=1)
+    
+    save_to_vtk(np.reshape(predictions[0], (128, 128, 128)), "vtk_files/{}_subtracted".format("0_predict"))
+    save_to_vtk(np.reshape(predictions[1], (128, 128, 128)), "vtk_files/{}_subtracted".format("1_predict"))
+    
+    print ("written")
+    """ 
+    #output_mask = model.predict(x)
+    log = model.fit(x=np.asarray(features), y=np.asarray(labels), batch_size=1, epochs=50000, verbose=2, callbacks=[unet_checkpoint])
+
+test_unet()
+
+#log = model_unet_3d().fit_generator(generator=generator(True), steps_per_epoch = 1, epochs = 1000, verbose=2)
+#log = get_sae().fit_generator(generator=generator(True), steps_per_epoch = 5, epochs = 1000, verbose=2, callbacks=[sae_checkpoint])
 
 
-
+"""
 cnn = load_model(CNN_PATH)
 cnn.compile(loss=keras.losses.categorical_crossentropy,
         optimizer= keras.optimizers.SGD(lr=0.01))
@@ -419,6 +552,8 @@ print(predictions)
 #print(cnn.summary())
 
 #log = cnn.fit_generator(generator=generator(False), steps_per_epoch = 1, epochs = 1000, verbose = 2, callbacks=[cnn_checkpoint])
+
+"""
 
 """log = model.fit_generator(generator=train_generator(),
                     steps_per_epoch=np.ceil(float(len(ids_train_split)) / float(batch_size)),
