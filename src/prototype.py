@@ -35,7 +35,8 @@ SUBJECT_LABELS_PATH = "labels/stage1_labels.csv"
 INPUT_SHAPE = (128, 128, 128, 1)
 SAE_PATH = "weights/best_sae.h5"
 CNN_PATH = "weights/best_cnn.h5"
-UNET_PATH = "weights/best_unet.h5"
+UNET_PATH = "weights/best_leg_unet.h5"
+DATA_DIR='stage1_a3d'
 
 
 config = tf.ConfigProto()
@@ -333,7 +334,7 @@ def save_to_vtk(data, filepath):
     z = np.arange(data.shape[2]+1)
     gridToVTK(filepath, x, y, z, cellData={'data':data.copy()})
 
-def make_mask(xyz_list, data, filename):
+def make_mask(xyz_list, data, filename=None):
     mask = np.array(np.zeros((128, 128, 128)))
     for xyz in xyz_list:
         xs = xyz[0]
@@ -373,6 +374,46 @@ def unet_mask(data, filename):
     else: 
         return None
 
+
+def zone_mask(data, zones):
+    mask_coords = []
+    for zone in zones:
+        if zone == 1:
+            mask_coords.push(((0, 45), (0, 127), (91, 107)))
+        if zone == 2:
+            mask_coords.push(((0, 45), (0, 127), (101, 120)))
+        if zone == 3:
+            mask_coords.push(((83, 127), (0, 127), (91, 107)))
+        if zone == 4:
+            mask_coords.push(((83, 127), (0, 127), (101, 120)))
+        if zone == 5:
+            mask_coords.push(((15, 112), (68, 127), (75, 95)))
+        if zone == 6:
+            mask_coords.push(((0, 63), (0, 127), (58, 81)))
+        if zone == 7:
+            mask_coords.push(((63, 127), (0, 127), (58, 81)))
+        if zone == 8:
+            mask_coords.push(((0, 127), (0, 54), (42, 66)))
+        if zone == 9:
+            mask_coords.push(((0, 127), (54, 74), (42, 66)))
+        if zone == 10:
+            mask_coords.push(((0, 127), (74, 127), (42, 66)))
+        if zone == 11:
+            mask_coords.push(((0, 63), (0, 127), (28, 45)))
+        if zone == 12:
+            mask_coords.push(((63, 127), (0, 127), (28, 45)))
+        if zone == 13:
+            mask_coords.push(((0, 63), (0, 127), (12, 30)))
+        if zone == 14:
+            mask_coords.push(((63, 127), (0, 127), (12, 30)))
+        if zone == 15:
+            mask_coords.push(((0, 63), (0, 127), (0, 16)))
+        if zone == 16:
+            mask_coords.push(((63, 127), (0, 127), (0, 16)))
+        if zone == 17:
+            mask_coords.push(((15, 112), (0, 70), (75, 95)))
+    return make_mask(mask_coords, data)
+
 def test_unet_mask(filename):
     print ("testing...")
     filedata = read_data('stage1_a3d/{}'.format(filename))
@@ -392,8 +433,6 @@ def subtract_3d(filename):
                 data3[x][y][z] = data1[x][y][z] - data2[127-x][y][z]
     data = np.clip(data3, 0, 1)
     save_to_vtk(data, "vtk_files/{}_subtracted".format(filename))
-
-
 
 #print ("ok")
 
@@ -457,7 +496,6 @@ def generator(sae):
                 y_batch.append(unet_mask(scaled_data, filename))
                 x_batch.append(scaled_data)
 
-
             x_batch = np.array(x_batch)
             print (x_batch.shape)
             if sae is True:
@@ -466,7 +504,6 @@ def generator(sae):
                 y_batch = np.array(y_batch)
                 print (y_batch)
                 yield x_batch, y_batch
-
 
 #call train
 def load_data():
@@ -486,6 +523,123 @@ def load_data():
 
 sae_checkpoint = ModelCheckpoint(SAE_PATH, monitor='loss', verbose=1, save_best_only=True, mode='min')
 cnn_checkpoint = ModelCheckpoint(CNN_PATH, monitor='loss', verbose=1, save_best_only=True, mode='min')
+
+def get_files_and_zones(labels_df):
+    filenames = list(set(labels_df["Subject"].values.tolist()))
+    files_and_zones = {}
+    for filename in filenames:
+        subject = filename.split(".")[0]
+        threat_list = labels_df.loc[labels_df['Subject'] == subject]
+        threat_iter = threat_list.iterrows()
+        files_and_zones[filename] = []
+        while True:
+            threat = next(threat_iter, None)
+            if threat is None:
+                break
+            threat = threat[1]
+            if threat['Probability'] is 1:
+                zone = threat['Zone']
+                zone = int(zone[4:])
+                files_and_zones[filename].append(zone)
+    return files_and_zones
+
+def dataset_for_threat_zones(threat_zones, equivalent_zones=None):
+    labels_df = get_subject_labels()
+    files_and_zones = get_files_and_zones(labels_df)
+    threat_subjects = []
+    non_threat_subjects = []
+    equivalent_threat_subjects = []
+    for subject, zones in files_and_zones.items():
+        added = False
+        for tz in threat_zones:
+            if tz in zones and added == False:
+                threat_subjects.append((subject, zones))
+                added = True
+        for tz in zones:
+            if equivalent_zones and tz in equivalent_zones and added == False:
+                equivalent_threat_subjects.append((subject, zones))
+                added = True
+        if added == False:
+            non_threat_subjects.append((subject, zones))
+    if equivalent_zones:
+        return threat_subjects, equivalent_threat_subjects, non_threat_subjects
+    else: 
+        return threat_subjects, non_threat_subjects
+
+def crop_and_resize_3D(data):
+    max_x = 0
+    min_x = 512
+    max_y = 0
+    min_y = 512
+    max_z = 0
+    min_z = 660
+
+    for x in range(0, len(data)):
+        for y in range(0, len(data[x])):
+            for z in range(0, len(data[x][y])):
+                if data[x][y][z] > 0.25:
+                    if x > max_x: max_x = x
+                    if x < min_x: min_x = x
+                    if y > max_y: max_y = y
+                    if y < min_y: min_y = y
+                    if z > max_z: max_z = z
+                    if z < min_z: min_z = z
+    cropped_data = data[min_x:max_x, min_y:max_y, min_z:max_z]                   
+
+    x_ratio = 128 / (max_x - min_x)
+    y_ratio = 128 / (max_y - min_y)
+    z_ratio = 128 / (max_z - min_z)
+
+    print ("ratios: " + str(x_ratio) + " " + str(y_ratio) + " " + str(z_ratio))
+
+    return scipy.ndimage.zoom(cropped_data, (x_ratio, y_ratio, z_ratio))
+
+def test_crop_and_resize():
+    zones = list(range(1,17))
+    ts, non_ts = dataset_for_threat_zones(zones)
+    np.random.shuffle(ts)
+    print ('ts len: ' + str(len(ts)))
+    for i in range(0,5):
+        filedata = read_data(DATA_DIR + '/{}.a3d'.format(ts[i][0]))
+        resized_data = crop_and_resize_3D(filedata)
+        save_to_vtk(resized_data, "vtk_files/c_and_r_{}".format(ts[i][0]))
+
+test_crop_and_resize()
+
+def leg_generator(batch_size):
+    zones = [11, 13, 15]
+
+    ts, non_ts = dataset_for_threat_zones(zones)
+    subjects = []
+    for i in range(0, len(ts)):
+        this_ts = (ts[i][0], True)
+        this_non_ts = (non_ts[i][0], False)
+        subjects.append(this_ts)
+        subjects.append(this_non_ts)
+
+    save_one = True
+
+    while True:
+        for start in range(0, len(subjects), batch_size):
+            x_batch = []
+            y_batch = []
+            end = min(start + batch_size, len(subjects))
+            ids_train_batch = subjects[start:end]
+            for subject in ids_train_batch:
+                filedata = read_data(DATA_DIR + '/{}.a3d'.format(subject[0]))
+                #data = np.reshape(filedata, (512, 512, 660, 1))
+                scaled_data = scipy.ndimage.zoom(filedata, (0.25, 0.25, 0.194))
+                if subject[1] == True:
+                     #print ("TRUE!")
+                     leg_mask = make_mask([((0, 63), (0,127), (0, 50))], scaled_data)
+                else:
+                     #print ("FALSE!")
+                     leg_mask = make_mask([((0, 0), (0,0), (0, 0))], scaled_data)
+                y_batch.append(np.reshape(leg_mask, (128, 128, 128, 1)))
+                x_batch.append(np.reshape(scaled_data, (128, 128, 128, 1)))
+
+            x_batch = np.array(x_batch)
+            yield x_batch, x_batch
 
 def test_unet():
     print("running unet")
@@ -526,7 +680,25 @@ def test_unet():
     #output_mask = model.predict(x)
     log = model.fit(x=np.asarray(features), y=np.asarray(labels), batch_size=1, epochs=50000, verbose=2, callbacks=[unet_checkpoint])
 
-test_unet()
+#test_unet()
+
+def test_leg_unet():
+    model = unet_model_3d(INPUT_SHAPE)
+    model.load_weights(UNET_PATH)#"weights/1_mask.h5")#UNET_PATH)
+    model.compile(optimizer=SGD(lr=0.01), loss=dice_coef_loss, metrics=[dice_coef, 'acc'])
+    unet_checkpoint = ModelCheckpoint(UNET_PATH, monitor='loss', verbose=1, save_best_only=True, mode='min')
+    leg_gen = leg_generator(1)
+    log = model.fit_generator(leg_gen, 1, epochs=50000, verbose=2, callbacks=[unet_checkpoint], max_queue_size=1)
+
+#test_leg_unet()
+
+
+
+
+
+
+
+
 
 #log = model_unet_3d().fit_generator(generator=generator(True), steps_per_epoch = 1, epochs = 1000, verbose=2)
 #log = get_sae().fit_generator(generator=generator(True), steps_per_epoch = 5, epochs = 1000, verbose=2, callbacks=[sae_checkpoint])
