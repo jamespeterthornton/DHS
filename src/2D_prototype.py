@@ -111,12 +111,12 @@ def preprocess_tsa_data():
     #SUBJECT_LIST = df['Subject'].unique()
 
     # OPTION 2: get a list of all subjects for whom there is data
-    #SUBJECT_LIST = [os.path.splitext(subject)[0] for subject in os.listdir(INPUT_FOLDER)]
+    SUBJECT_LIST = [os.path.splitext(subject)[0] for subject in os.listdir(INPUT_FOLDER)]
     
     # OPTION 3: get a list of subjects for small bore test purposes
-    SUBJECT_LIST = ['00360f79fd6e02781457eda48f85da90','0043db5e8c819bffc15261b1f1ac5e42',
-                    '0050492f92e22eed3474ae3a6fc907fa','006ec59fa59dd80a64c85347eef810c7',
-                    '0097503ee9fa0606559c56458b281a08','011516ab0eca7cad7f5257672ddde70e']
+    #SUBJECT_LIST = ['00360f79fd6e02781457eda48f85da90','0043db5e8c819bffc15261b1f1ac5e42',
+    #                '0050492f92e22eed3474ae3a6fc907fa','006ec59fa59dd80a64c85347eef810c7',
+    #                '0097503ee9fa0606559c56458b281a08','011516ab0eca7cad7f5257672ddde70e']
     
     # intialize tracking and saving items
     batch_num = 1

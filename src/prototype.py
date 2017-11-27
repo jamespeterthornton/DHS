@@ -27,6 +27,7 @@ import cv2
 import sys
 import os
 from pyevtk.hl import gridToVTK
+import pickle
 
 from unet_3d import unet_model_3d, dice_coef, dice_coef_loss
 
@@ -345,9 +346,9 @@ def make_mask(xyz_list, data, filename=None):
       	        for z in range(zs[0], zs[1]):
     	            mask[x][y][z] = 1.0
     masked_data = np.multiply(mask, data)
-    save_to_vtk(masked_data, "vtk_files/{}_mask".format(filename))
-    print ('inside shape:')
-    print (masked_data.shape)
+    #save_to_vtk(masked_data, "vtk_files/{}_mask".format(filename))
+    #print ('inside shape:')
+    #print (masked_data.shape)
     return masked_data
 
 def unet_mask(data, filename):
@@ -379,39 +380,41 @@ def zone_mask(data, zones):
     mask_coords = []
     for zone in zones:
         if zone == 1:
-            mask_coords.push(((0, 45), (0, 127), (91, 107)))
+            mask_coords.append(((0, 45), (0, 127), (91, 107)))
         if zone == 2:
-            mask_coords.push(((0, 45), (0, 127), (101, 120)))
+            mask_coords.append(((0, 45), (0, 127), (101, 120)))
         if zone == 3:
-            mask_coords.push(((83, 127), (0, 127), (91, 107)))
+            mask_coords.append(((83, 127), (0, 127), (91, 107)))
         if zone == 4:
-            mask_coords.push(((83, 127), (0, 127), (101, 120)))
+            mask_coords.append(((83, 127), (0, 127), (101, 120)))
         if zone == 5:
-            mask_coords.push(((15, 112), (68, 127), (75, 95)))
+            mask_coords.append(((15, 112), (68, 127), (75, 95)))
         if zone == 6:
-            mask_coords.push(((0, 63), (0, 127), (58, 81)))
+            #mask_coords.append(((0, 63), (0, 127), (58, 81)))
+            mask_coords.append(((0, 63), (0, 127), (58, 87)))
         if zone == 7:
-            mask_coords.push(((63, 127), (0, 127), (58, 81)))
+            #mask_coords.append(((63, 127), (0, 127), (58, 81)))
+            mask_coords.append(((63, 127), (0, 127), (58, 87)))
         if zone == 8:
-            mask_coords.push(((0, 127), (0, 54), (42, 66)))
+            mask_coords.append(((0, 127), (0, 54), (42, 66)))
         if zone == 9:
-            mask_coords.push(((0, 127), (54, 74), (42, 66)))
+            mask_coords.append(((0, 127), (54, 74), (42, 66)))
         if zone == 10:
-            mask_coords.push(((0, 127), (74, 127), (42, 66)))
+            mask_coords.append(((0, 127), (74, 127), (42, 66)))
         if zone == 11:
-            mask_coords.push(((0, 63), (0, 127), (28, 45)))
+            mask_coords.append(((0, 63), (0, 127), (28, 45)))
         if zone == 12:
-            mask_coords.push(((63, 127), (0, 127), (28, 45)))
+            mask_coords.append(((63, 127), (0, 127), (28, 45)))
         if zone == 13:
-            mask_coords.push(((0, 63), (0, 127), (12, 30)))
+            mask_coords.append(((0, 63), (0, 127), (12, 30)))
         if zone == 14:
-            mask_coords.push(((63, 127), (0, 127), (12, 30)))
+            mask_coords.append(((63, 127), (0, 127), (12, 30)))
         if zone == 15:
-            mask_coords.push(((0, 63), (0, 127), (0, 16)))
+            mask_coords.append(((0, 63), (0, 127), (0, 16)))
         if zone == 16:
-            mask_coords.push(((63, 127), (0, 127), (0, 16)))
+            mask_coords.append(((63, 127), (0, 127), (0, 16)))
         if zone == 17:
-            mask_coords.push(((15, 112), (0, 70), (75, 95)))
+            mask_coords.append(((15, 112), (0, 70), (75, 95)))
     return make_mask(mask_coords, data)
 
 def test_unet_mask(filename):
@@ -604,19 +607,12 @@ def test_crop_and_resize():
         resized_data = crop_and_resize_3D(filedata)
         save_to_vtk(resized_data, "vtk_files/c_and_r_{}".format(ts[i][0]))
 
-test_crop_and_resize()
+#test_crop_and_resize()
 
-def leg_generator(batch_size):
-    zones = [11, 13, 15]
-
+def preseg_generator(batch_size):
+    zones = list(range(1,18))    
     ts, non_ts = dataset_for_threat_zones(zones)
-    subjects = []
-    for i in range(0, len(ts)):
-        this_ts = (ts[i][0], True)
-        this_non_ts = (non_ts[i][0], False)
-        subjects.append(this_ts)
-        subjects.append(this_non_ts)
-
+    subjects = ts + non_ts    
     save_one = True
 
     while True:
@@ -627,19 +623,25 @@ def leg_generator(batch_size):
             ids_train_batch = subjects[start:end]
             for subject in ids_train_batch:
                 filedata = read_data(DATA_DIR + '/{}.a3d'.format(subject[0]))
-                #data = np.reshape(filedata, (512, 512, 660, 1))
-                scaled_data = scipy.ndimage.zoom(filedata, (0.25, 0.25, 0.194))
-                if subject[1] == True:
-                     #print ("TRUE!")
-                     leg_mask = make_mask([((0, 63), (0,127), (0, 50))], scaled_data)
-                else:
-                     #print ("FALSE!")
-                     leg_mask = make_mask([((0, 0), (0,0), (0, 0))], scaled_data)
-                y_batch.append(np.reshape(leg_mask, (128, 128, 128, 1)))
-                x_batch.append(np.reshape(scaled_data, (128, 128, 128, 1)))
+                preprocessed_data = crop_and_resize_3D(filedata)
+                mask = zone_mask(preprocessed_data, subject[1])
+                if save_one == True:
+                    save_to_vtk(mask, subject[0])
+                    save_one = False
+                with open('data3D/preprocessed/{}_prep.pickle'.format(subject[0]), 'wb') as handle:
+                    pickle.dump(preprocessed_data, handle, protocol = pickle.HIGHEST_PROTOCOL)
 
+                with open('data3D/masks/{}_mask.pickle'.format(subject[0]), 'wb') as handle:
+                    pickle.dump(mask, handle, protocol = pickle.HIGHEST_PROTOCOL)
+
+                x = np.reshape(preprocessed_data, (128, 128, 128, 1))
+                y = np.reshape(mask, (128, 128, 128, 1))
+
+                x_batch.append(x)
+                y_batch.append(y)
             x_batch = np.array(x_batch)
-            yield x_batch, x_batch
+            y_batch = np.array(y_batch)
+            yield x_batch, y_batch
 
 def test_unet():
     print("running unet")
@@ -687,12 +689,13 @@ def test_leg_unet():
     model.load_weights(UNET_PATH)#"weights/1_mask.h5")#UNET_PATH)
     model.compile(optimizer=SGD(lr=0.01), loss=dice_coef_loss, metrics=[dice_coef, 'acc'])
     unet_checkpoint = ModelCheckpoint(UNET_PATH, monitor='loss', verbose=1, save_best_only=True, mode='min')
-    leg_gen = leg_generator(1)
+    leg_gen = preseg_generator(1)
     log = model.fit_generator(leg_gen, 1, epochs=50000, verbose=2, callbacks=[unet_checkpoint], max_queue_size=1)
 
-#test_leg_unet()
+test_leg_unet()
 
-
+#leg_gen = preseg_generator(1)
+#next(leg_gen)
 
 
 
@@ -734,5 +737,5 @@ print(predictions)
                     callbacks=callbacks,
                     validation_data=valid_generator(),
                     validation_steps=np.ceil(float(len(ids_valid_split)) / float(batch_size)))
-
+UNET_PATH)#
 """
