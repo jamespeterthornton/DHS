@@ -25,13 +25,18 @@ from keras.layers import BatchNormalization, GlobalMaxPooling2D
 from keras.models import load_model
 from keras.preprocessing.image import ImageDataGenerator
 from keras.backend.tensorflow_backend import set_session
-from keras.callbacks import ModelCheckpoint
+from keras.callbacks import ModelCheckpoint, EarlyStopping
 from keras.applications.vgg16 import VGG16
+from keras.applications.inception_resnet_v2 import InceptionResNetV2
 from keras.backend.tensorflow_backend import set_session
 from keras.utils.np_utils import to_categorical
 
 import random
 from timeit import default_timer as timer
+
+import time
+
+from src.logging_callback import LoggingCallback
 
 import tsahelper.tsahelper as tsa
 import scipy
@@ -78,6 +83,7 @@ from PIL import Image
 INPUT_FOLDER = 'stage1_aps'
 PREPROCESSED_DATA_FOLDER = 'tsa_datasets/preprocessed/'
 STAGE1_LABELS = 'labels/stage1_labels.csv'
+STAGE1_SAMPLE_SUB = 'labels/stage1_sample_submission.csv'
 SUBJECT_LABELS_PATH = "labels/stage1_labels.csv"
 THREAT_ZONE = 11
 BATCH_SIZE = 16
@@ -115,6 +121,14 @@ def get_train_test_file_list():
     print('Train/Test Split -> {} file(s) of {} used for testing'.format( 
          len(SUBJECT_LIST) - train_test_split, len(SUBJECT_LIST)))
 
+def get_lb_file_list():
+    global LB_SUBJECT_LIST
+    df = pd.read_csv(STAGE1_SAMPLE_SUB)
+    df['Subject'], df['Zone'] = df['Id'].str.split('_',1).str
+    LB_SUBJECT_LIST = df['Subject'].unique()
+    print('Sample sub loaded -> {} file(s) used for sub'.format( 
+         len(LB_SUBJECT_LIST)))
+
 def get_subject_labels():
     infile = SUBJECT_LABELS_PATH
     df = pd.read_csv(infile)
@@ -145,132 +159,132 @@ def get_zone15(img):
     crops = []
     for slice_num in range(0, len(img)):
         if slice_num == 0:
-            crops.append(img[slice_num, 0:60, 0:128])
+            crops.append(np.array(img[slice_num])[ 0:60, 0:128])
         elif slice_num == 1:
-            crops.append(img[slice_num,0:60, 0:128])
+            crops.append(np.array(img[slice_num])[0:60, 0:128])
         elif slice_num == 2:
-            crops.append(img[slice_num,0:60, 0:128])
+            crops.append(np.array(img[slice_num])[0:60, 0:128])
         elif slice_num == 3:
-            crops.append(img[slice_num,0:60, 0:160])
+            crops.append(np.array(img[slice_num])[0:60, 0:160])
         elif slice_num == 5:
-            crops.append(img[slice_num, 0:60,160:256])
+            crops.append(np.array(img[slice_num])[ 0:60,160:256])
         elif slice_num == 6:
-            crops.append(img[slice_num, 0:60, 140:256])
+            crops.append(np.array(img[slice_num])[ 0:60, 140:256])
         elif slice_num == 7:
-            crops.append(img[slice_num, 0:60, 128:256])
+            crops.append(np.array(img[slice_num])[ 0:60, 128:256])
         elif slice_num == 8:
-            crops.append(img[slice_num, 0:60, 130:256])
+            crops.append(np.array(img[slice_num])[ 0:60, 130:256])
         elif slice_num == 9:
-            crops.append(img[slice_num, 0:60, 120:256])
+            crops.append(np.array(img[slice_num])[ 0:60, 120:256])
         elif slice_num == 10:
-            crops.append(img[slice_num, 0:60, 100:256])
+            crops.append(np.array(img[slice_num])[ 0:60, 100:256])
         elif slice_num == 11:
-            crops.append(img[slice_num, 0:60, 75:256])
+            crops.append(np.array(img[slice_num])[ 0:60, 75:256])
         elif slice_num == 12:
-            crops.append(img[slice_num, 0:60, 0:256])
+            crops.append(np.array(img[slice_num])[ 0:60, 0:256])
         elif slice_num == 13:
-            crops.append(img[slice_num, 0:60, 0:120])
+            crops.append(np.array(img[slice_num])[ 0:60, 0:120])
         elif slice_num == 14:
-            crops.append(img[slice_num, 0:60, 0:128])
+            crops.append(np.array(img[slice_num])[ 0:60, 0:128])
         elif slice_num == 15:
-            crops.append(img[slice_num, 0:60, 0:128])
+            crops.append(np.array(img[slice_num])[ 0:60, 0:128])
     return crops   
 
 def get_zone3(img):
     crops = []
     for slice_num in range(0, len(img)):
         if slice_num == 0:
-            crops.append(img[slice_num,200:315,150:256])
+            crops.append(np.array(img[slice_num])[200:315,150:256])
         elif slice_num == 1:
-            crops.append(img[slice_num,200:315,150:256])
+            crops.append(np.array(img[slice_num])[200:315,150:256])
         elif slice_num == 2:
-            crops.append(img[slice_num,200:315,150:256])
+            crops.append(np.array(img[slice_num])[200:315,150:256])
         elif slice_num == 3:
-            crops.append(img[slice_num,200:315,150:256])
+            crops.append(np.array(img[slice_num])[200:315,150:256])
         elif slice_num == 4:
-            crops.append(img[slice_num,200:315,55:205])
+            crops.append(np.array(img[slice_num])[200:315,55:205])
         elif slice_num == 5:
-            crops.append(img[slice_num,200:315,0:200])
+            crops.append(np.array(img[slice_num])[200:315,0:200])
         elif slice_num == 6:
-            crops.append(img[slice_num,200:315,0:155])
+            crops.append(np.array(img[slice_num])[200:315,0:155])
         elif slice_num == 7:
-            crops.append(img[slice_num,200:315,0:130])
+            crops.append(np.array(img[slice_num])[200:315,0:130])
         elif slice_num == 8:
-            crops.append(img[slice_num,200:315,0:110])
+            crops.append(np.array(img[slice_num])[200:315,0:110])
         elif slice_num == 9:
-            crops.append(img[slice_num,200:315,0:110])
+            crops.append(np.array(img[slice_num])[200:315,0:110])
         elif slice_num == 10:
-            crops.append(img[slice_num,200:315,0:110])
+            crops.append(np.array(img[slice_num])[200:315,0:110])
         elif slice_num == 13:
-            crops.append(img[slice_num,200:315,150:256])
+            crops.append(np.array(img[slice_num])[200:315,150:256])
         elif slice_num == 14:
-            crops.append(img[slice_num,200:315,150:256])
+            crops.append(np.array(img[slice_num])[200:315,150:256])
         elif slice_num == 15:
-            crops.append(img[slice_num,200:315,150:256])
+            crops.append(np.array(img[slice_num])[200:315,150:256])
     return crops
 
 def get_zone9(img):
     crops = []
     for slice_num in range(0, len(img)):
         if slice_num == 0:
-            crops.append(img[slice_num,80:190,80:176])
+            crops.append(np.array(img[slice_num])[80:190,80:176])
         elif slice_num == 1:
-            crops.append(img[slice_num,80:190,70:176])
+            crops.append(np.array(img[slice_num])[80:190,70:176])
         elif slice_num == 2:
-            crops.append(img[slice_num,80:190,45:176])
+            crops.append(np.array(img[slice_num])[80:190,45:176])
         elif slice_num == 3:
-            crops.append(img[slice_num,80:190,15:176])
+            crops.append(np.array(img[slice_num])[80:190,15:176])
         elif slice_num == 6:
-            crops.append(img[slice_num,80:190,80:256])
+            crops.append(np.array(img[slice_num])[80:190,80:256])
         elif slice_num == 7:
-            crops.append(img[slice_num,80:190,80:186])
+            crops.append(np.array(img[slice_num])[80:190,80:186])
         elif slice_num == 8:
-            crops.append(img[slice_num,80:190,80:176])
+            crops.append(np.array(img[slice_num])[80:190,80:176])
         elif slice_num == 9:
-            crops.append(img[slice_num,80:190,40:176])
+            crops.append(np.array(img[slice_num])[80:190,40:176])
         elif slice_num == 10:
-            crops.append(img[slice_num,80:190,0:156])
+            crops.append(np.array(img[slice_num])[80:190,0:156])
         elif slice_num == 13:
-            crops.append(img[slice_num,80:190,80:216])
+            crops.append(np.array(img[slice_num])[80:190,80:216])
         elif slice_num == 14:
-            crops.append(img[slice_num,80:190,80:186])
+            crops.append(np.array(img[slice_num])[80:190,80:186])
         elif slice_num == 15:
-            crops.append(img[slice_num,80:190,80:176])
+            crops.append(np.array(img[slice_num])[80:190,80:176])
     return crops
 
 def get_zone13(img):
     crops = []
     for slice_num in range(0, len(img)):
         if slice_num == 0:
-            crops.append(img[slice_num,15:100,0:128])
+            crops.append(np.array(img[slice_num])[15:100,0:128])
         elif slice_num == 1:
-            crops.append(img[slice_num,15:100,0:128])
+            crops.append(np.array(img[slice_num])[15:100,0:128])
         elif slice_num == 2:
-            crops.append(img[slice_num,15:100,0:148])
+            crops.append(np.array(img[slice_num])[15:100,0:148])
         elif slice_num == 3:
-            crops.append(img[slice_num,15:100,0:190])
+            crops.append(np.array(img[slice_num])[15:100,0:190])
         elif slice_num == 5:
-            crops.append(img[slice_num,15:100,160:256])
+            crops.append(np.array(img[slice_num])[15:100,160:256])
         elif slice_num == 6:
-            crops.append(img[slice_num,15:100,140:256])
+            crops.append(np.array(img[slice_num])[15:100,140:256])
         elif slice_num == 7:
-            crops.append(img[slice_num,15:100,128:256])
+            crops.append(np.array(img[slice_num])[15:100,128:256])
         elif slice_num == 8:
-            crops.append(img[slice_num,15:100,130:256])
+            crops.append(np.array(img[slice_num])[15:100,130:256])
         elif slice_num == 9:
-            crops.append(img[slice_num,15:100,120:256])
+            crops.append(np.array(img[slice_num])[15:100,120:256])
         elif slice_num == 10:
-            crops.append(img[slice_num,15:100,80:256])
+            crops.append(np.array(img[slice_num])[15:100,80:256])
         elif slice_num == 11:
-            crops.append(img[slice_num,15:100,35:256])
+            crops.append(np.array(img[slice_num])[15:100,35:256])
         elif slice_num == 12:
-            crops.append(img[slice_num,15:100,0:256])
+            crops.append(np.array(img[slice_num])[15:100,0:256])
         elif slice_num == 13:
-            crops.append(img[slice_num,15:100,0:120])
+            crops.append(np.array(img[slice_num])[15:100,0:120])
         elif slice_num == 14:
-            crops.append(img[slice_num,15:100,0:128])
+            crops.append(np.array(img[slice_num])[15:100,0:128])
         elif slice_num == 15:
-            crops.append(img[slice_num,15:100,0:128])
+            crops.append(np.array(img[slice_num])[15:100,0:128])
     return crops
 
 def get_zone11(img):
@@ -419,6 +433,29 @@ def get_zone5(img):
         elif slice_num == 15:
             crops.append(np.array(img[slice_num])[185:260,46:256])
     return crops   
+
+def get_zone(tz, cropped_ims):
+    if tz == 15:
+        return get_zone15(cropped_ims)
+    elif tz == 3:
+        return get_zone3(cropped_ims)
+    elif tz == 9:
+        return get_zone9(cropped_ims)
+    elif tz == 13:
+        return get_zone13(cropped_ims)
+    elif tz == 11:
+        return get_zone11(cropped_ims)
+    elif tz == 8:
+        return get_zone8(cropped_ims)
+    elif tz == 6:
+        return get_zone6(cropped_ims)
+    elif tz == 4:
+        return get_zone4(cropped_ims)
+    elif tz == 5:
+        return get_zone5(cropped_ims)
+    else:
+        print ("Get zone FAILURE!")
+        return None
  
 def switch_chest_back(image):
     temp_im = image
@@ -538,6 +575,73 @@ def preprocess_plates():
 
 #preprocess_plates()
 
+def preprocess_lb_plates_for_tz(tz, flip_tz):
+    TOP_DIR = "lb_plates/" + str(tz) + "/ims/"
+    get_lb_file_list()
+    #list existing files so we can skip those
+    files_list = os.listdir(TOP_DIR)
+    already_prepped_subs = []
+    for sub_file in files_list:
+        already_prepped_subs.append(sub_file.split(".")[0])
+    for already_prepped in already_prepped_subs[:5]:
+        print ("ap: " + already_prepped)
+    if flip_tz:
+        flip_list = [False, True]
+    else:
+        flip_list = [False]
+
+    for should_flip in flip_list:
+
+        print("advance sf")
+        for subject in LB_SUBJECT_LIST:
+            sub_name = subject
+            if should_flip:
+                sub_name = sub_name + "_Zone" + str(flip_tz)
+            else:
+                sub_name = sub_name + "_Zone" + str(tz)
+
+            print ("name: " + str(sub_name))
+            if sub_name not in already_prepped_subs:
+                #Try - Keep running even if one file is troublesome (corrupted or missing data)
+                if True:#try:
+                    images = tsa.read_data(INPUT_FOLDER + '/' + subject + '.aps')
+                    images = images.transpose()
+                    if tz == 9:
+                        images_to_use = images
+                    elif tz == 5:
+                        images_to_use = switch_chest_back(images) if should_flip else images  
+                    else:
+                        images_to_use = flip_and_switch(images) if should_flip else images
+                    cropped_ims = []
+                    for i in range(0, len(images_to_use)):
+                        if tz in [15, 3, 9, 13]:
+                            cropped_ims.append(crop_and_resize_2D(images_to_use[i]))
+                        else:
+                            if i==3 or i==5 or i==11 or i==13:
+                                cropped_ims.append(crop_and_resize_2D(images_to_use[i], x_resize_ratio=0.75))
+                            elif i==4 or i==12:
+                                cropped_ims.append(crop_and_resize_2D(images_to_use[i], x_resize_ratio=0.5))
+                            else:
+                                cropped_ims.append(crop_and_resize_2D(images_to_use[i]))
+                    for i in range(0, len(cropped_ims)):
+                        cropped_ims[i] = cv2.resize(cropped_ims[i], (0,0), fx=0.5, fy=0.5) 
+                    pre_stack = get_zone(tz, cropped_ims)
+                    stack = np.hstack(pre_stack)
+                    path = TOP_DIR + sub_name + ".jpg"
+                    scipy.misc.imsave(path, stack)   
+                #except:
+                #    print ("Failed!!!")    
+    print ("next!")
+"""preprocess_lb_plates_for_tz(15, 16)
+preprocess_lb_plates_for_tz(9, None)
+preprocess_lb_plates_for_tz(3, 1)
+preprocess_lb_plates_for_tz(13, 14)
+preprocess_lb_plates_for_tz(11, 12)
+preprocess_lb_plates_for_tz(8, 10)
+preprocess_lb_plates_for_tz(6, 7)
+preprocess_lb_plates_for_tz(4, 2)
+preprocess_lb_plates_for_tz(5, 17)"""
+
 def convert_to_grayscale(img):
     # scale pixel values to grayscale
     base_range = np.amax(img) - np.amin(img)
@@ -547,8 +651,9 @@ def convert_to_grayscale(img):
     return np.uint8(img_rescaled)
 
 def spread_spectrum(img):
-    img = stats.threshold(img, threshmin=12, newval=0)
-    
+    #img = stats.threshold(img, threshmin=12, newval=0)
+    img = np.clip(img, 12, None)
+
     # see http://docs.opencv.org/3.1.0/d5/daf/tutorial_py_histogram_equalization.html
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
     img= clahe.apply(img)
@@ -556,10 +661,10 @@ def spread_spectrum(img):
     return img
 
 def make_bigger_plates():
-    ORIGINAL_DIR = "plates/1/"
+    ORIGINAL_DIR = "plates/4/"
     CHANNELS_DIR = "plates/1/channels/"
     VERTICAL_DIR = "plates/1/vertical/"
-    PREPROC_DIR = "plates/1/preproc/"
+    PREPROC_DIR = "plates/4/preproc/"
     SUB_DIRS = ["test/threats/", "test/non_threats/", "train/threats/", "train/non_threats/"]
     
     for directory in SUB_DIRS:
@@ -593,7 +698,7 @@ def make_bigger_plates():
                 orig_image = np.array(orig_image)
 
                 orig_image = convert_to_grayscale(orig_image)"""
-                orig_image = Image.open(ORIGINAL_DIR + directory + sub_file).convert('I')
+                orig_image = Image.open(orig_path + sub_file).convert('I')
                 orig_image = convert_to_grayscale(orig_image)
                 orig_image = spread_spectrum(orig_image)
                 scipy.misc.imsave(preproc_path + sub_file, orig_image)
@@ -606,6 +711,9 @@ def make_bigger_plates():
                 trans_channels_image = np.array([trans_orig_image[0], trans_orig_image[1], trans_flip_image[0]])
                 channels_image = trans_channels_image.transpose()"""
                 #scipy.misc.imsave(chan_path + sub_file, channels_image)
+
+#make_bigger_plates()
+#print("plates made")
 
 def plate_generator(subjects, batch_size):
 
@@ -850,7 +958,26 @@ def MVCNN(weights_path=None):
 
     return full_model
 
+def res_plate(input_size):
+    #base_model = VGG16(weights='imagenet', include_top=False, input_shape=(input_size[0], input_size[1], 3))
+    #vgg = base_model.get_layer('block2_pool').output
+    resnet_model = InceptionResNetV2(weights='imagenet', include_top=False, input_shape=(input_size[0], input_size[1], 3))#(34, 528, 128))
+    x = resnet_model.output#(vgg)
+    x = Flatten()(x)
+    x = Dense(1024, activation='relu', name='fc1')(x)
+    x = Dropout(0.35)(x)
+    x = Dense(1, activation='sigmoid', name='prediction')(x)
+    model = Model(inputs=resnet_model.inputs, outputs=x)
+    #model.summary()
+    #base_model.summary()
+    sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.7, nesterov=True)
+    model.compile(loss='binary_crossentropy',
+                  optimizer=sgd,
+                  metrics=['accuracy'])
+    return model
+
 def VGG_plate(input_size, weights_path=None):
+    print ("VGG!")
     #inputs  = Input((1707, 115, 3))
     base_model = VGG16(weights='imagenet', include_top=False, input_shape=(input_size[0], input_size[1], 3))
     x = base_model.get_layer('block2_pool').output
@@ -877,40 +1004,40 @@ def VGG_plate(input_size, weights_path=None):
     """
     x = Conv2D(256, (3, 3), activation='relu')(x)
     x = BatchNormalization(axis=1)(x)
-    x = ZeroPadding2D((0, 1))(x)
+    x = ZeroPadding2D((1, 0))(x)
     x = Conv2D(256, (3, 3), activation='relu')(x)
     x = BatchNormalization(axis=1)(x)
-    x = ZeroPadding2D((0, 1))(x)
+    x = ZeroPadding2D((1, 0))(x)
     x = Conv2D(256, (3, 3), activation='relu')(x)
     x = BatchNormalization(axis=1)(x)
    
-    x = ZeroPadding2D((1, 2))(x)
+    x = ZeroPadding2D((2, 1))(x)
     x = MaxPooling2D((3,3), strides=(2,2))(x)
 
     x = Conv2D(512, (3, 3), activation='relu')(x)
     x = BatchNormalization(axis=1)(x)
-    x = ZeroPadding2D((0, 1))(x)
+    x = ZeroPadding2D((1, 0))(x)
     x = Conv2D(512, (3, 3), activation='relu')(x)
     x = BatchNormalization(axis=1)(x)
-    x = ZeroPadding2D((0, 1))(x)
+    x = ZeroPadding2D((1, 0))(x)
     x = Conv2D(512, (3, 3), activation='relu')(x)
     x = BatchNormalization(axis=1)(x)
-    x = ZeroPadding2D((0, 1))(x)
+    x = ZeroPadding2D((1, 0))(x)
    
-    x = ZeroPadding2D((1, 2))(x)
+    x = ZeroPadding2D((2, 1))(x)
     x = MaxPooling2D((3,3), strides=(2,2))(x)
 
     x = Conv2D(512, (3, 3), activation='relu')(x)
     x = BatchNormalization(axis=1)(x)
-    x = ZeroPadding2D((0, 1))(x)
+    x = ZeroPadding2D((1, 0))(x)
     x = Conv2D(512, (3, 3), activation='relu')(x)
     x = BatchNormalization(axis=1)(x)
-    x = ZeroPadding2D((0, 1))(x)
+    x = ZeroPadding2D((1, 0))(x)
     x = Conv2D(512, (3, 3), activation='relu')(x)
     x = BatchNormalization(axis=1)(x)
-    x = ZeroPadding2D((0, 1))(x)
+    x = ZeroPadding2D((1, 0))(x)
    
-    x = ZeroPadding2D((1, 2))(x)
+    x = ZeroPadding2D((2, 1))(x)
     x = MaxPooling2D((3,3), strides=(2,2))(x)
 
     x = Flatten()(x)
@@ -928,7 +1055,7 @@ def VGG_plate(input_size, weights_path=None):
 
     model = Model(inputs=base_model.inputs, outputs=x)
 
-    base_model.summary()
+    #base_model.summary()
 
     model.summary()
 
@@ -1162,8 +1289,7 @@ def train_binary_net():
     print ("lengths:")
     print(len(test_subjects))
     print(len(train_subjects))
-    # get train and test batches
-    get_train_test_file_list()
+    # get train and test batches get_train_test_file_list()
     features, labels = get_dataset(TRAIN_SET_FILE_LIST, PREPROCESSED_DATA_FOLDER)
     val_features, val_labels = get_dataset(TEST_SET_FILE_LIST, PREPROCESSED_DATA_FOLDER)
     features = features.reshape(-1, IMAGE_DIM, IMAGE_DIM, 3)
@@ -1179,7 +1305,7 @@ def train_binary_net():
     """
 #train_binary_net()
 
-def train_plate_net():
+def train_plate_net(tz):
     get_train_test_file_list()
     batch_size = 4
     #train_gen = plate_generator(TRAIN_SUBJECT_LIST, batch_size)
@@ -1188,29 +1314,188 @@ def train_plate_net():
     #test_steps = np.ceil(float(len(TEST_SUBJECT_LIST)) / float(batch_size))
     #train_steps = np.ceil(float(189) / float(batch_size))
     #test_steps = np.ceil(float(45) / float(batch_size))
+    INPUT_SHAPES = {15: (139, 2115), 3: (139, 1707), 9: (139, 1502), 13: (139, 2225), 11: (139, 2009), 8: (139, 1651), 6: (139, 1818),
+        4: (139, 1524), 5: (139, 1337)}
+    INPUT_SIZE = INPUT_SHAPES[tz]
 
     train_gen = ImageDataGenerator(width_shift_range=0.0156, height_shift_range=0.2, zoom_range=0.05)
     test_gen = ImageDataGenerator()
 
-    #Zone 15
-    INPUT_SIZE = (1337, 75)
 
-    model = VGG_plate(INPUT_SIZE)
-    #model.load_weights("weights/best_plate9_cnn.h5")
-    cnn_checkpoint = ModelCheckpoint("weights/plate_models/5/best_plate6_cnn.h5", monitor='val_loss', verbose=1, save_best_only=True, mode='min')
+    model = res_plate(INPUT_SIZE)
+    #model.load_weights("weights/plate_models/15/best_resnet_exp_1.h5")
+
+    checkpoint1_path = "weights/plate_models/" + str(tz) +"/best_resnet_exp_1.h5"
+    cnn_checkpoint = ModelCheckpoint(checkpoint1_path, monitor='val_loss', verbose=1, save_best_only=True, mode='min')
+    es = EarlyStopping('val_loss', patience=7, mode="min")
+    lc = LoggingCallback('resnet_1_tz_' + str(tz), net_name=str(tz)+"_resnet_exp")
+
+    """print ("low init LR")
+    sgd = keras.optimizers.SGD(lr=0.0001, decay=1e-6, momentum=0.7, nesterov=True)
+    model.compile(loss='binary_crossentropy',
+                  optimizer=sgd,
+                  metrics=['accuracy'])
+
+
     #model.fit_generator(generator=train_gen, validation_data=test_gen, steps_per_epoch = train_steps, validation_steps = test_steps, 
     #    epochs = 1000, verbose=2, callbacks=[cnn_checkpoint])
+    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 1, verbose=2, callbacks=[cnn_checkpoint, es, lc]) 
+    time.sleep(90)
+    print ("increasing LR")
+    sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.7, nesterov=True)
+    model.compile(loss='binary_crossentropy',
+                  optimizer=sgd,
+                  metrics=['accuracy'])
 
-    model.fit_generator(generator=train_gen.flow_from_directory("plates/5/train", class_mode="binary", batch_size=4, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/5/test", class_mode="binary", batch_size=4, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 1000, verbose=2, callbacks=[cnn_checkpoint])
+    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[cnn_checkpoint, es, lc])
 
-train_plate_net()
+    time.sleep(90)"""
+    model.load_weights(checkpoint1_path)
+    print ("back to low LR")
+    sgd = keras.optimizers.SGD(lr=0.0001, decay=1e-6, momentum=0.7, nesterov=True)
+    model.compile(loss='binary_crossentropy',
+                  optimizer=sgd,
+                  metrics=['accuracy'])
+    checkpoint2 = ModelCheckpoint("weights/plate_models/" + str(tz) +"/best_resnet_exp_low_lr.h5", monitor='val_loss', verbose=1, save_best_only=True, mode='min')
+    
+    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[checkpoint2, es, lc])
+    time.sleep(90)
 
-def save_plates():
-    train_gen = plate_generator(TRAIN_SUBJECT_LIST, batch_size)
-    test_gen = plate_generator(TEST_SUBJECT_LIST, batch_size)
-    for i in range(0, 190):
-        x, y = next(train_gen)
 
+def train_plate_nets():
+    #15 already complete[3, 9, 13, 11, [8, 6, 4, 5
+    #9
+    #change to dictionary w/ the name of the best network
+    for tz in [4, 3, 11, 5, 8, 6, 13]:
+        try: 
+            train_plate_net(tz)
+        except:
+            print("Failed!")
+            time.sleep(400)
+
+train_plate_nets()
+
+def predict_plates2():
+    print ("predictin...")
+    sub_file = open("labels/resnet_sub_1_2.csv", "w")
+    sub_file.write("Id,Probability\n")
+    INPUT_SHAPES = {15: (139, 2115), 3: (139, 1707), 9: (139, 1502), 13: (139, 2225), 11: (139, 2009), 8: (139, 1651), 6: (139, 1818),
+        4: (139, 1524), 5: (139, 1337)}
+    #INPUT_SHAPES = {15: (2115, 60), 3: (1707, 115), 9: (1502, 110), 13: (2225, 85), 11: (2009, 110), 8: (1651, 95), 6: (1818, 100),
+    #    4: (1524, 85), 5: (1337, 75)}
+    pred_gen = ImageDataGenerator()
+    for tz in [15, 3, 9, 13, 11, 8, 6, 4, 5]:
+        print("Tz: " + str(tz))
+        model = res_plate(INPUT_SHAPES[tz])
+        model.load_weights("weights/plate_models/" + str(tz) + "/best_resnet.h5")
+        dir_path = "lb_plates/" + str(tz) 
+        plate_files = os.listdir(dir_path + "/ims")
+        #print(plate_files[:10])
+        i = 0
+        for plate_file in plate_files:
+            if i % 20 == 0:
+                print (str(i))
+            plate = np.asarray(Image.open(dir_path + "/ims/" + plate_file).convert("RGB"))
+            #print("1")
+            plate = scipy.ndimage.zoom(plate, (139.0/plate.shape[0], 1, 1))
+            #print("2")
+            #plate = plate.reshape((plate.shape[1], plate.shape[0], plate.shape[2]))
+            #print("3")
+            plate_name = plate_file.split(".")[0]
+            #print("4")
+            plate_array = []
+            #print("5")
+            plate_array.append(plate)
+            #print("6")
+            x = np.array(plate_array)
+            #print("7")
+            predictions = model.predict(x)
+            #print("8")
+            predictions = np.clip(predictions, 0.05, 0.95)
+            #print("9")
+            sub_file.write(plate_name + ", " + str(predictions[0][0]) + "\n")
+            #print("10")
+            i = i + 1
+
+
+            #print(dir_path)
+            #steps_count = len(plate_files) -1
+            """
+            gen = pred_gen.flow_from_directory(dir_path, class_mode=None, shuffle=False, target_size=INPUT_SHAPES[tz], batch_size=1, save_to_dir="plates/pred_plates")
+            for i in range(0, 5):
+                print (next(gen))
+
+            classifications = model.predict_generator(pred_gen.flow_from_directory(dir_path, class_mode=None, shuffle=False, target_size=INPUT_SHAPES[tz], batch_size=1, save_to_dir="plates/pred_plates"), steps=5) #len(plate_files))
+            print (len(classifications))
+            classifications = np.clip(classifications, 0.05, 0.95)
+            for i in range(0, len(classifications)):
+                #print(plate_files[i].split(".")[0] + ", " + str(classifications[i][0]) + "\n")
+                sub_file.write(plate_files[i].split(".")[0] + ", " + str(classifications[i][0]) + "\n")
+                i = i + 1
+            """
+
+#predict_plates2()
+
+def predict_plates():
+    print ("predictin...")
+    sub_file = open("labels/resnet_sub_1_1.csv", "w")
+    sub_file.write("Id,Probability\n")
+    INPUT_SHAPES = {15: (139, 2115), 3: (139, 1707), 9: (139, 1502), 13: (139, 2225), 11: (139, 2009), 8: (139, 1651), 6: (139, 1818),
+        4: (139, 1524), 5: (139, 1337)}
+    #INPUT_SHAPES = {15: (2115, 60), 3: (1707, 115), 9: (1502, 110), 13: (2225, 85), 11: (2009, 110), 8: (1651, 95), 6: (1818, 100),
+    #    4: (1524, 85), 5: (1337, 75)}
+    pred_gen = ImageDataGenerator()
+    for tz in [15]:#, 3, 9, 13, 11, 8, 6, 4, 5]:
+        model = res_plate(INPUT_SHAPES[tz])
+        model.load_weights("weights/plate_models/" + str(tz) + "/best_resnet.h5")
+        dir_path = "lb_plates/" + str(tz) 
+        plate_files = os.listdir(dir_path + "/ims")
+        print(plate_files[:5])
+        print(plate_files[-5:])
+        i = 0
+        if True: #for plate_file in plate_files:
+            """plate = np.asarray(Image.open(dir_path + "/" + plate_file).convert("RGB"))
+            plate = plate.reshape((plate.shape[1], plate.shape[0], plate.shape[2]))
+            plate_name = plate_file.split(".")[0]
+            plate_array = []
+            plate_array.append(plate)
+            x = np.array(plate_array)"""
+            #print(dir_path)
+            #steps_count = len(plate_files) -1
+
+            gen = pred_gen.flow_from_directory(dir_path, class_mode=None, shuffle=False, target_size=INPUT_SHAPES[tz], batch_size=1, save_to_dir="plates/pred_plates")
+            for i in range(0, 5):
+                print (next(gen))
+
+            classifications = model.predict_generator(pred_gen.flow_from_directory(dir_path, class_mode=None, shuffle=False, target_size=INPUT_SHAPES[tz], batch_size=1, save_to_dir="plates/pred_plates"), steps=5) #len(plate_files))
+            print (len(classifications))
+            classifications = np.clip(classifications, 0.05, 0.95)
+            for i in range(0, len(classifications)):
+                #print(plate_files[i].split(".")[0] + ", " + str(classifications[i][0]) + "\n")
+                sub_file.write(plate_files[i].split(".")[0] + ", " + str(classifications[i][0]) + "\n")
+                i = i + 1
+
+#predict_plates2()
+
+def evaluate_plates():
+    print("evaluate")
+    INPUT_SHAPES = {15: (139, 2115), 3: (139, 1707), 9: (139, 1502), 13: (139, 2225), 11: (139, 2009), 8: (139, 1651), 6: (139, 1818),
+        4: (139, 1524), 5: (139, 1337)}
+    #INPUT_SHAPES = {15: (2115, 60), 3: (1707, 115), 9: (1502, 110), 13: (2225, 85), 11: (2009, 110), 8: (1651, 95), 6: (1818, 100),
+    #    4: (1524, 85), 5: (1337, 75)}
+    pred_gen = ImageDataGenerator()
+    for tz in [15, 3, 9, 13, 11, 8, 6, 4, 5]:
+        model = res_plate(INPUT_SHAPES[tz])
+        model.load_weights("weights/plate_models/" + str(tz) + "/best_resnet.h5")
+        plates_dir = "plates/" + str(tz) + "/test"
+        plates = os.listdir(plates_dir + "/threats") + os.listdir(plates_dir+"/non_threats")
+        batch_size = 4
+        print(len(plates))
+        print ("TZ: " + str(tz))
+        print(model.metrics_names)
+        print(model.evaluate_generator(pred_gen.flow_from_directory(plates_dir, class_mode="binary", batch_size=4, target_size=INPUT_SHAPES[tz]), steps=len(plates)/batch_size))
+
+#evaluate_plates()
 
 def test_dae():
 
@@ -1308,4 +1593,3 @@ def make_submission():
     sub_file.close()
 
 #make_submission() 
-
