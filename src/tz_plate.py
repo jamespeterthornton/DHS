@@ -8,11 +8,6 @@ import os
 import re
 
 import tensorflow as tf
-import tflearn
-from tflearn.layers.conv import conv_2d, max_pool_2d
-from tflearn.layers.core import input_data, dropout, fully_connected
-from tflearn.layers.estimator import regression
-from tflearn.layers.normalization import local_response_normalization
 
 import keras
 from keras.models import Sequential
@@ -37,14 +32,15 @@ from timeit import default_timer as timer
 
 import time
 
-from src.logging_callback import LoggingCallback
+from logging_callback import LoggingCallback
 
 import tsahelper.tsahelper as tsa
 import scipy
 import scipy.stats as stats
-import imageio
+#from imageio
 import cv2
 from PIL import Image
+
 #---------------------------------------------------------------------------------------
 # Constants
 #
@@ -1427,14 +1423,16 @@ def train_plate_net(tz):
 
     #model.fit_generator(generator=train_gen, validation_data=test_gen, steps_per_epoch = train_steps, validation_steps = test_steps, 
     #    epochs = 1000, verbose=2, callbacks=[cnn_checkpoint])
+    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 1, verbose=2, callbacks=[cnn_checkpoint, es, lc]) 
     
-    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 1000, verbose=2, callbacks=[cnn_checkpoint, lc]) 
     """time.sleep(90)
     print ("increasing LR")
     sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.7, nesterov=True)
     model.compile(loss='binary_crossentropy',
                   optimizer=sgd,
                   metrics=['accuracy'])
+
+    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[cnn_checkpoint, es, lc])
     """
     #model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[cnn_checkpoint, es, lc])
     """
@@ -1450,6 +1448,7 @@ def train_plate_net(tz):
     model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/preproc/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/preproc/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[checkpoint2, es, lc])
     time.sleep(90)
     """
+
 def train_plate_nets():
     print("train plate nets")
     #15 already complete[3, 9, 13, 11, [8, 6, 4, 5
