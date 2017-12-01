@@ -15,13 +15,14 @@ from keras.layers import Dense, Dropout, Flatten, Reshape, Concatenate
 from keras.layers import Conv2D, MaxPooling2D, UpSampling2D, ZeroPadding2D, GlobalAveragePooling2D, Input, Convolution2D
 from keras.models import Model
 from keras import backend as K
-from keras.layers import Activation
+from keras.layers import Activation, LeakyReLU
 from keras.layers import BatchNormalization, GlobalMaxPooling2D
 from keras.models import load_model
 from keras.preprocessing.image import ImageDataGenerator
 from keras.backend.tensorflow_backend import set_session
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 from keras.applications.vgg16 import VGG16
+from keras.applications.resnet50 import ResNet50
 from keras.applications.inception_resnet_v2 import InceptionResNetV2
 from keras.backend.tensorflow_backend import set_session
 from keras.utils.np_utils import to_categorical
@@ -494,16 +495,18 @@ def flip_and_switch(image):
         a[i] = np.fliplr(temp_im[16-i])
         a[16-i] = temp
     return a
+
+#Update - TZ (top_dir), whether to switch and flip, get_zone, whether to resize, threat prob / path, dirs, sf, sub list
  
 def preprocess_plates():
-    TOP_DIR = "plates/5/"
+    TOP_DIR = "plates/9/full_size/"
     TRAIN_DIR_NAME = "train/"
     TEST_DIR_NAME = "test/"
     THREAT_DIR_NAME = "threats/"
     NON_THREAT_DIR_NAME = "non_threats/"
     FLIP_NAME = "flip_"
-    DIRS = [TOP_DIR+TRAIN_DIR_NAME+THREAT_DIR_NAME, TOP_DIR+TRAIN_DIR_NAME+NON_THREAT_DIR_NAME,
-                TOP_DIR+TEST_DIR_NAME+THREAT_DIR_NAME, TOP_DIR+TEST_DIR_NAME+NON_THREAT_DIR_NAME]
+    DIRS = [TOP_DIR+TRAIN_DIR_NAME+THREAT_DIR_NAME, TOP_DIR+TRAIN_DIR_NAME+NON_THREAT_DIR_NAME, 
+        TOP_DIR+TEST_DIR_NAME+THREAT_DIR_NAME, TOP_DIR+TEST_DIR_NAME+NON_THREAT_DIR_NAME]
     get_train_test_file_list()
     labels = get_subject_labels()
     #list existing files so we can skip those
@@ -533,7 +536,8 @@ def preprocess_plates():
                     try:
                         images = tsa.read_data(INPUT_FOLDER + '/' + subject + '.aps')
                         images = images.transpose()
-                        images_to_use = switch_chest_back(images) if should_flip else images #flip_and_switch(images) if should_flip else images
+                        #images_to_use = switch_chest_back(images) if should_flip else images 
+                        images_to_use = flip_and_switch(images) if should_flip else images
                         cropped_ims = []
                         for i in range(0, len(images_to_use)):
                             if i==3 or i==5 or i==11 or i==13:
@@ -542,29 +546,29 @@ def preprocess_plates():
                                 cropped_ims.append(crop_and_resize_2D(images_to_use[i], x_resize_ratio=0.5))
                             else:
                                 cropped_ims.append(crop_and_resize_2D(images_to_use[i]))
-                        for i in range(0, len(cropped_ims)):
-                            cropped_ims[i] = cv2.resize(cropped_ims[i], (0,0), fx=0.5, fy=0.5) 
+                        #for i in range(0, len(cropped_ims)):
+                        #    cropped_ims[i] = cv2.resize(cropped_ims[i], (0,0), fx=0.5, fy=0.5) 
                         #ims = scipy.ndimage.zoom(cropped_ims, (1, 0.5, 0.5))
-                        pre_stack = get_zone5(cropped_ims)
+                        pre_stack = get_zone9(cropped_ims)
                         stack = np.hstack(pre_stack)
                         path = TOP_DIR + folder + "/"
-                        threat_prob_5 =  get_threat_prob(5, labels, subject)
-                        threat_prob_17 =  get_threat_prob(17, labels, subject)
+                        #threat_prob_5 =  get_threat_prob(5, labels, subject)
+                        #threat_prob_17 =  get_threat_prob(17, labels, subject)
                         #threat_prob_1 =  get_threat_prob(1, labels, subject)
                         #threat_prob_3 =  get_threat_prob(3, labels, subject)
-                        """threat_prob_9 =  get_threat_prob(9, labels, subject)
+                        threat_prob_9 =  get_threat_prob(9, labels, subject)
                         if threat_prob_9 == True:
                             path = path + THREAT_DIR_NAME
                         else:
-                            path = path + NON_THREAT_DIR_NAME"""
-                        if threat_prob_5 == 1 and threat_prob_17 == 1:
+                            path = path + NON_THREAT_DIR_NAME
+                        """if threat_prob_5 == 1 and threat_prob_17 == 1:
                             path = path + THREAT_DIR_NAME 
                         elif should_flip and threat_prob_17 == 1:
                             path = path + THREAT_DIR_NAME
                         elif not should_flip and threat_prob_5 == 1:
                             path = path + THREAT_DIR_NAME
                         else:
-                            path = path + NON_THREAT_DIR_NAME
+                            path = path + NON_THREAT_DIR_NAME"""
                         scipy.misc.imsave(path + sub_name + ".jpg", stack)   
                     except:
                         print ("Failed!!!")    
@@ -954,6 +958,22 @@ def MVCNN(weights_path=None):
 
     return full_model
 
+def resnet50(input_size):
+    resnet_model = ResNet50(weights='imagenet', include_top=False, input_shape=(input_size[0], input_size[1], 3))
+    x = resnet_model.output
+    x = Flatten()(x)
+    x = Dense(1024, activation='linear', name='fc1')(x)
+    x = LeakyReLU(alpha=0.1)(x)
+    x = Dropout(0.2)(x)
+    #x = BatchNormalization()(x)
+    x = Dense(1, activation='sigmoid', name='prediction')(x)
+    model = Model(inputs=resnet_model.inputs, outputs=x)
+    sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.7, nesterov=True)
+    model.compile(loss='binary_crossentropy',
+                  optimizer=sgd,
+                  metrics=['accuracy'])
+    return model
+
 def res_plate(input_size):
     #base_model = VGG16(weights='imagenet', include_top=False, input_shape=(input_size[0], input_size[1], 3))
     #vgg = base_model.get_layer('block2_pool').output
@@ -961,7 +981,7 @@ def res_plate(input_size):
     x = resnet_model.output#(vgg)
     x = Flatten()(x)
     x = Dense(1024, activation='relu', name='fc1')(x)
-    x = Dropout(0.35)(x)
+    #x = Dropout(0.15)(x)
     x = Dense(1, activation='sigmoid', name='prediction')(x)
     model = Model(inputs=resnet_model.inputs, outputs=x)
     #model.summary()
@@ -1310,24 +1330,27 @@ def train_plate_net(tz):
     #test_steps = np.ceil(float(len(TEST_SUBJECT_LIST)) / float(batch_size))
     #train_steps = np.ceil(float(189) / float(batch_size))
     #test_steps = np.ceil(float(45) / float(batch_size))
-    INPUT_SHAPES = {15: (139, 2115), 3: (139, 1707), 9: (139, 1502), 13: (139, 2225), 11: (139, 2009), 8: (139, 1651), 6: (139, 1818),
-        4: (139, 1524), 5: (139, 1337)}
+    INPUT_SHAPES = {15: (197, 2115), 3: (197, 1707), 9: (197, 1502), 13: (197, 2225), 11: (197, 2009), 
+        8: (197, 1651), 6: (197, 1818), 4: (197, 1524), 5: (197, 1337)}
     INPUT_SIZE = INPUT_SHAPES[tz]
 
     train_gen = ImageDataGenerator(width_shift_range=0.0156, height_shift_range=0.2, zoom_range=0.05)
+
+    #zone 4
+    #train_gen = ImageDataGenerator(width_shift_range=0.03, height_shift_range=0.3, zoom_range=0.1)
     test_gen = ImageDataGenerator()
 
+    checkpoint1_path = "weights/plate_models/" + str(tz) +"/best_resnet50_dropout_3.h5"
 
-    model = res_plate(INPUT_SIZE)
-    #model.load_weights("weights/plate_models/15/best_resnet_exp_1.h5")
+    model = resnet50(INPUT_SIZE)
+    #model.load_weights("weights/plate_models/" + str(tz) +"/best_resnet50_aug_bs_4.h5")
 
-    checkpoint1_path = "weights/plate_models/" + str(tz) +"/best_resnet_exp_1.h5"
     cnn_checkpoint = ModelCheckpoint(checkpoint1_path, monitor='val_loss', verbose=1, save_best_only=True, mode='min')
-    es = EarlyStopping('val_loss', patience=7, mode="min")
-    lc = LoggingCallback('resnet_1_tz_' + str(tz), net_name=str(tz)+"_resnet_exp")
+    es = EarlyStopping('val_loss', patience=14, mode="min")
+    lc = LoggingCallback('resnet_1_tz_' + str(tz), net_name=str(tz)+"_resnet50_high_lr_bs_4")
 
-    """print ("low init LR")
-    sgd = keras.optimizers.SGD(lr=0.0001, decay=1e-6, momentum=0.7, nesterov=True)
+    print ("low init LR")
+    sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.7, nesterov=True)
     model.compile(loss='binary_crossentropy',
                   optimizer=sgd,
                   metrics=['accuracy'])
@@ -1337,6 +1360,8 @@ def train_plate_net(tz):
     #    epochs = 1000, verbose=2, callbacks=[cnn_checkpoint])
     model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 1, verbose=2, callbacks=[cnn_checkpoint, es, lc]) 
     time.sleep(90)"""
+    
+    """time.sleep(90)
     print ("increasing LR")
     sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.7, nesterov=True)
     model.compile(loss='binary_crossentropy',
@@ -1344,6 +1369,8 @@ def train_plate_net(tz):
                   metrics=['accuracy'])
 
     model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[cnn_checkpoint, es, lc])
+    """
+    #model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[cnn_checkpoint, es, lc])
     """
     time.sleep(90)
     model.load_weights(checkpoint1_path)
@@ -1354,22 +1381,26 @@ def train_plate_net(tz):
                   metrics=['accuracy'])
     checkpoint2 = ModelCheckpoint("weights/plate_models/" + str(tz) +"/best_resnet_exp_low_lr.h5", monitor='val_loss', verbose=1, save_best_only=True, mode='min')
     
-    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[checkpoint2, es, lc])
+    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/preproc/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/preproc/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[checkpoint2, es, lc])
     time.sleep(90)
     """
+<<<<<<< HEAD
 
 def train_plate_nets():
     #15 already complete[3, 9, 13, 11, [8, 6, 4, 5
     #9
     #change to dictionary w/ the name of the best network
-    for tz in [3, 11, 5, 8, 6, 13]:
-        if True:#try: 
+    for tz in [9, 4, 3, 11, 5, 8, 6, 13, 15]:
+        try: 
             train_plate_net(tz)
-        #except:
-        #    print("Failed!")
-        #    time.sleep(400)
+            
+        except:
+            print("Failed!")
+            time.sleep(400)
+        K.clear_session()
+        time.sleep(30)
 
-train_plate_nets()
+#train_plate_nets()
 
 def predict_plates2():
     print ("predictin...")
@@ -1416,19 +1447,6 @@ def predict_plates2():
 
             #print(dir_path)
             #steps_count = len(plate_files) -1
-            """
-            gen = pred_gen.flow_from_directory(dir_path, class_mode=None, shuffle=False, target_size=INPUT_SHAPES[tz], batch_size=1, save_to_dir="plates/pred_plates")
-            for i in range(0, 5):
-                print (next(gen))
-
-            classifications = model.predict_generator(pred_gen.flow_from_directory(dir_path, class_mode=None, shuffle=False, target_size=INPUT_SHAPES[tz], batch_size=1, save_to_dir="plates/pred_plates"), steps=5) #len(plate_files))
-            print (len(classifications))
-            classifications = np.clip(classifications, 0.05, 0.95)
-            for i in range(0, len(classifications)):
-                #print(plate_files[i].split(".")[0] + ", " + str(classifications[i][0]) + "\n")
-                sub_file.write(plate_files[i].split(".")[0] + ", " + str(classifications[i][0]) + "\n")
-                i = i + 1
-            """
 
 #predict_plates2()
 
