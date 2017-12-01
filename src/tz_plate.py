@@ -224,6 +224,35 @@ def get_zone3(img):
             crops.append(np.array(img[slice_num])[200:315,150:256])
     return crops
 
+def get_zone9_fs(img):
+    crops = []
+    for slice_num in range(0, len(img)):
+        if slice_num == 0:
+            crops.append(np.array(img[slice_num])[160:380,160:352])
+        elif slice_num == 1:
+            crops.append(np.array(img[slice_num])[160:380,140:352])
+        elif slice_num == 2:
+            crops.append(np.array(img[slice_num])[160:380,90:352])
+        elif slice_num == 3:
+            crops.append(np.array(img[slice_num])[160:380,30:352])
+        elif slice_num == 6:
+            crops.append(np.array(img[slice_num])[160:380,160:512])
+        elif slice_num == 7:
+            crops.append(np.array(img[slice_num])[160:380,160:372])
+        elif slice_num == 8:
+            crops.append(np.array(img[slice_num])[160:380,160:352])
+        elif slice_num == 9:
+            crops.append(np.array(img[slice_num])[160:380,80:352])
+        elif slice_num == 10:
+            crops.append(np.array(img[slice_num])[160:380,0:312])
+        elif slice_num == 13:
+            crops.append(np.array(img[slice_num])[160:380,160:432])
+        elif slice_num == 14:
+            crops.append(np.array(img[slice_num])[160:380,160:372])
+        elif slice_num == 15:
+            crops.append(np.array(img[slice_num])[160:380,160:352])
+    return crops
+
 def get_zone9(img):
     crops = []
     for slice_num in range(0, len(img)):
@@ -553,7 +582,7 @@ def preprocess_plates():
                         #for i in range(0, len(cropped_ims)):
                         #    cropped_ims[i] = cv2.resize(cropped_ims[i], (0,0), fx=0.5, fy=0.5) 
                         #ims = scipy.ndimage.zoom(cropped_ims, (1, 0.5, 0.5))
-                        pre_stack = get_zone9(cropped_ims)
+                        pre_stack = get_zone9_fs(cropped_ims)
                         stack = np.hstack(pre_stack)
                         path = TOP_DIR + folder + "/"
                         #threat_prob_5 =  get_threat_prob(5, labels, subject)
@@ -577,7 +606,7 @@ def preprocess_plates():
                     except:
                         print ("Failed!!!")    
 
-#preprocess_plates()
+preprocess_plates()
 
 def preprocess_lb_plates_for_tz(tz, flip_tz):
     TOP_DIR = "lb_plates/" + str(tz) + "/ims/"
@@ -962,13 +991,39 @@ def MVCNN(weights_path=None):
 
     return full_model
 
+def tl_resnet50(input_size):
+    resnet_model_1 = ResNet50(weights='imagenet', include_top=False, input_shape=(input_size[0], input_size[1], 3))
+    resnet_model_2 = ResNet50(weights=None, include_top=False, input_shape=(input_size[0], input_size[1], 3))
+    tl_output = resnet_model_1.get_layer('add_8')
+    model_2_input = resnet_model_2.get_layer('activation_25')
+    x = model_2_input(tl_output)
+    for layer in resnet_model_1:
+        layer.trainable = False
+    x = Dense(1, activation='sigmoid', name='prediction')(x)
+    model = Model(inputs=resnet_model.inputs, outputs=x)
+    sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.7, nesterov=True)
+    model.compile(loss='binary_crossentropy',
+                  optimizer=sgd,
+                  metrics=['accuracy'])
+
+    model.summary()
+
+    return model
+
+
 def resnet50(input_size):
-    resnet_model = ResNet50(weights='imagenet', include_top=False, input_shape=(input_size[0], input_size[1], 3))
+    resnet_model = ResNet50(weights=None, include_top=False, input_shape=(input_size[0], input_size[1], 3))
     x = resnet_model.output
     x = Flatten()(x)
-    x = Dense(1024, activation='linear', name='fc1')(x)
+    """x = Dense(1024, activation='linear', name='fc1')(x)
     x = LeakyReLU(alpha=0.1)(x)
-    x = Dropout(0.2)(x)
+    x = Dropout(0.25)(x)
+    x = Dense(512, activation='linear', name='fc2')(x)
+    x = LeakyReLU(alpha=0.1)(x)
+    x = Dropout(0.25)(x)
+    x = Dense(256, activation='linear', name='fc3')(x)
+    x = LeakyReLU(alpha=0.1)(x)
+    x = Dropout(0.25)(x)"""
     #x = BatchNormalization()(x)
     x = Dense(1, activation='sigmoid', name='prediction')(x)
     model = Model(inputs=resnet_model.inputs, outputs=x)
@@ -976,7 +1031,12 @@ def resnet50(input_size):
     model.compile(loss='binary_crossentropy',
                   optimizer=sgd,
                   metrics=['accuracy'])
+
+    model.summary()
+
     return model
+
+
 
 def res_plate(input_size):
     #base_model = VGG16(weights='imagenet', include_top=False, input_shape=(input_size[0], input_size[1], 3))
@@ -1326,6 +1386,7 @@ def train_binary_net():
 #train_binary_net()
 
 def train_plate_net(tz):
+    
     get_train_test_file_list()
     batch_size = 4
     #train_gen = plate_generator(TRAIN_SUBJECT_LIST, batch_size)
@@ -1336,6 +1397,8 @@ def train_plate_net(tz):
     #test_steps = np.ceil(float(45) / float(batch_size))
     INPUT_SHAPES = {15: (197, 2115), 3: (197, 1707), 9: (197, 1502), 13: (197, 2225), 11: (197, 2009), 
         8: (197, 1651), 6: (197, 1818), 4: (197, 1524), 5: (197, 1337)}
+    #INPUT_SHAPES = {15: (139, 2115), 3: (139, 1707), 9: (139, 1502), 13: (139, 2225), 11: (139, 2009), 8: (139, 1651), 6: (139, 1818),
+    #    4: (139, 1524), 5: (139, 1337)}
     INPUT_SIZE = INPUT_SHAPES[tz]
 
     train_gen = ImageDataGenerator(width_shift_range=0.0156, height_shift_range=0.2, zoom_range=0.05)
@@ -1344,14 +1407,17 @@ def train_plate_net(tz):
     #train_gen = ImageDataGenerator(width_shift_range=0.03, height_shift_range=0.3, zoom_range=0.1)
     test_gen = ImageDataGenerator()
 
-    checkpoint1_path = "weights/plate_models/" + str(tz) +"/best_resnet50_dropout_3.h5"
+    model_name = "resnet_no_weights.h5"
 
+    checkpoint1_path = "weights/plate_models/" + str(tz) +"/" + model_name
+
+    #model = res_plate(INPUT_SIZE)
     model = resnet50(INPUT_SIZE)
     #model.load_weights("weights/plate_models/" + str(tz) +"/best_resnet50_aug_bs_4.h5")
 
     cnn_checkpoint = ModelCheckpoint(checkpoint1_path, monitor='val_loss', verbose=1, save_best_only=True, mode='min')
     es = EarlyStopping('val_loss', patience=14, mode="min")
-    lc = LoggingCallback('resnet_1_tz_' + str(tz), net_name=str(tz)+"_resnet50_high_lr_bs_4")
+    lc = LoggingCallback('resnet_1_tz_' + str(tz), net_name=str(tz)+model_name)
 
     print ("low init LR")
     sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.7, nesterov=True)
@@ -1359,11 +1425,10 @@ def train_plate_net(tz):
                   optimizer=sgd,
                   metrics=['accuracy'])
 
-
     #model.fit_generator(generator=train_gen, validation_data=test_gen, steps_per_epoch = train_steps, validation_steps = test_steps, 
     #    epochs = 1000, verbose=2, callbacks=[cnn_checkpoint])
     
-    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[cnn_checkpoint, es, lc]) 
+    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 1000, verbose=2, callbacks=[cnn_checkpoint, lc]) 
     """time.sleep(90)
     print ("increasing LR")
     sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.7, nesterov=True)
@@ -1386,34 +1451,83 @@ def train_plate_net(tz):
     time.sleep(90)
     """
 def train_plate_nets():
+    print("train plate nets")
     #15 already complete[3, 9, 13, 11, [8, 6, 4, 5
     #9
     #change to dictionary w/ the name of the best network
-    for tz in [9, 4, 3, 11, 5, 8, 6, 13, 15]:
-        try: 
+    for tz in [9, 4, 15, 3, 11, 5, 8, 6, 13]:
+        if True:#try: 
             train_plate_net(tz)
             
-        except:
-            print("Failed!")
-            time.sleep(400)
+        #except:
+        #    print("Failed!")
+        #    time.sleep(400)
         K.clear_session()
         time.sleep(30)
 
 #train_plate_nets()
 
+INPUT_SHAPES = {15: (139, 2115), 3: (139, 1707), 9: (139, 1502), 13: (139, 2225), 11: (139, 2009), 8: (139, 1651), 6: (139, 1818),
+        4: (139, 1524), 5: (139, 1337)}
+INPUT_SHAPES_50 = {15: (197, 2115), 3: (197, 1707), 9: (197, 1502), 13: (197, 2225), 11: (197, 2009), 
+        8: (197, 1651), 6: (197, 1818), 4: (197, 1524), 5: (197, 1337)}
+SHAPES_TO_USE = {15: (139, 2115), 3: (197, 1707), 9: (197, 1502), 13: (197, 2225), 11: (197, 2009), 
+        8: (197, 1651), 6: (197, 1818), 4: (197, 1524), 5: (197, 1337)}
+
+def get_models_dict():
+    tz_15_model_1 = res_plate(INPUT_SHAPES[15])
+    tz_15_model_1.load_weights("weights/plate_models/15/best_resnet_exp_1.h5")
+
+    tz_3_model_1 = resnet50(INPUT_SHAPES_50[3])
+    tz_3_model_1.load_weights("weights/plate_models/3/best_resnet50_dropout_2.h5")
+
+    tz_9_model_1 = resnet50(INPUT_SHAPES_50[9])
+    tz_9_model_1.load_weights("weights/plate_models/9/best_resnet_50_leaky.h5")
+
+    tz_13_model_1 = resnet50(INPUT_SHAPES_50[13])
+    tz_13_model_1.load_weights("weights/plate_models/13/best_resnet50_dropout_2.h5")
+
+    tz_11_model_1 = resnet50(INPUT_SHAPES_50[11])
+    tz_11_model_1.load_weights("weights/plate_models/11/best_resnet50_dropout_2.h5")
+
+    tz_8_model_1 = resnet50(INPUT_SHAPES_50[8])
+    tz_8_model_1.load_weights("weights/plate_models/8/best_resnet50_dropout_2.h5")
+
+    tz_6_model_1 = resnet50(INPUT_SHAPES_50[6])
+    tz_6_model_1.load_weights("weights/plate_models/6/best_resnet50_dropout_2.h5")
+
+    tz_4_model_1 = resnet50(INPUT_SHAPES_50[4])
+    tz_4_model_1.load_weights("weights/plate_models/4/best_resnet50_dropout_2.h5")
+
+    tz_5_model_1 = resnet50(INPUT_SHAPES_50[5])
+    tz_5_model_1.load_weights("weights/plate_models/5/best_resnet50_dropout_2.h5")
+    
+    tz_models_dict = {
+        15: [tz_15_model_1],
+        3: [tz_3_model_1],
+        9: [tz_9_model_1],
+        13: [tz_13_model_1],
+        11: [tz_11_model_1],
+        8: [tz_8_model_1],
+        6: [tz_6_model_1],
+        4: [tz_4_model_1],
+        5: [tz_5_model_1]
+    }
+
+    return tz_models_dict
+
 def predict_plates2():
     print ("predictin...")
     sub_file = open("labels/resnet_sub_1_2.csv", "w")
     sub_file.write("Id,Probability\n")
-    INPUT_SHAPES = {15: (139, 2115), 3: (139, 1707), 9: (139, 1502), 13: (139, 2225), 11: (139, 2009), 8: (139, 1651), 6: (139, 1818),
-        4: (139, 1524), 5: (139, 1337)}
-    #INPUT_SHAPES = {15: (2115, 60), 3: (1707, 115), 9: (1502, 110), 13: (2225, 85), 11: (2009, 110), 8: (1651, 95), 6: (1818, 100),
-    #    4: (1524, 85), 5: (1337, 75)}
     pred_gen = ImageDataGenerator()
+
+    models_dict = get_models_dict()
+
     for tz in [15, 3, 9, 13, 11, 8, 6, 4, 5]:
         print("Tz: " + str(tz))
-        model = res_plate(INPUT_SHAPES[tz])
-        model.load_weights("weights/plate_models/" + str(tz) + "/best_resnet.h5")
+        model = models_dict[tz][0]
+
         dir_path = "lb_plates/" + str(tz) 
         plate_files = os.listdir(dir_path + "/ims")
         #print(plate_files[:10])
@@ -1423,7 +1537,7 @@ def predict_plates2():
                 print (str(i))
             plate = np.asarray(Image.open(dir_path + "/ims/" + plate_file).convert("RGB"))
             #print("1")
-            plate = scipy.ndimage.zoom(plate, (139.0/plate.shape[0], 1, 1))
+            plate = scipy.ndimage.zoom(plate, (SHAPES_TO_USE[tz][0]/plate.shape[0], 1, 1))
             #print("2")
             #plate = plate.reshape((plate.shape[1], plate.shape[0], plate.shape[2]))
             #print("3")
@@ -1442,7 +1556,6 @@ def predict_plates2():
             sub_file.write(plate_name + ", " + str(predictions[0][0]) + "\n")
             #print("10")
             i = i + 1
-
 
             #print(dir_path)
             #steps_count = len(plate_files) -1
@@ -1492,21 +1605,24 @@ def predict_plates():
 
 def evaluate_plates():
     print("evaluate")
-    INPUT_SHAPES = {15: (139, 2115), 3: (139, 1707), 9: (139, 1502), 13: (139, 2225), 11: (139, 2009), 8: (139, 1651), 6: (139, 1818),
-        4: (139, 1524), 5: (139, 1337)}
-    #INPUT_SHAPES = {15: (2115, 60), 3: (1707, 115), 9: (1502, 110), 13: (2225, 85), 11: (2009, 110), 8: (1651, 95), 6: (1818, 100),
-    #    4: (1524, 85), 5: (1337, 75)}
     pred_gen = ImageDataGenerator()
-    for tz in [15, 3, 9, 13, 11, 8, 6, 4, 5]:
-        model = res_plate(INPUT_SHAPES[tz])
-        model.load_weights("weights/plate_models/" + str(tz) + "/best_resnet.h5")
+
+    models_dict = get_models_dict()
+
+    for tz in [15, 9, 3, 13, 11, 8, 6, 4, 5]:
+        model = models_dict[tz][0]
         plates_dir = "plates/" + str(tz) + "/test"
         plates = os.listdir(plates_dir + "/threats") + os.listdir(plates_dir+"/non_threats")
         batch_size = 4
         print(len(plates))
         print ("TZ: " + str(tz))
         print(model.metrics_names)
-        print(model.evaluate_generator(pred_gen.flow_from_directory(plates_dir, class_mode="binary", batch_size=4, target_size=INPUT_SHAPES[tz]), steps=len(plates)/batch_size))
+        try:
+            print("normal shapes")
+            print(model.evaluate_generator(pred_gen.flow_from_directory(plates_dir, class_mode="binary", batch_size=4, target_size=INPUT_SHAPES[tz]), steps=len(plates)/batch_size))
+        except:
+            print("50 shapes")
+            print(model.evaluate_generator(pred_gen.flow_from_directory(plates_dir, class_mode="binary", batch_size=4, target_size=INPUT_SHAPES_50[tz]), steps=len(plates)/batch_size))
 
 #evaluate_plates()
 
