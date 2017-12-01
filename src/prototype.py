@@ -589,9 +589,9 @@ def crop_and_resize_3D(data):
                     if z < min_z: min_z = z
     cropped_data = data[min_x:max_x, min_y:max_y, min_z:max_z]                   
 
-    x_ratio = 128 / (max_x - min_x)
-    y_ratio = 128 / (max_y - min_y)
-    z_ratio = 128 / (max_z - min_z)
+    x_ratio = 512 / (max_x - min_x)
+    y_ratio = 256 / (max_y - min_y)
+    z_ratio = 512 / (max_z - min_z)
 
     print ("ratios: " + str(x_ratio) + " " + str(y_ratio) + " " + str(z_ratio))
 
@@ -608,6 +608,39 @@ def test_crop_and_resize():
         save_to_vtk(resized_data, "vtk_files/c_and_r_{}".format(ts[i][0]))
 
 #test_crop_and_resize()
+
+def extract_zones():
+    print("extracting zone 4")
+    zones = list(range(1,18))    
+    ts, non_ts = dataset_for_threat_zones(zones)
+    subjects = ts + non_ts    
+    save_one = True
+    batch_size = 1
+
+    for start in range(0, len(subjects), batch_size):
+        print("we're on: " + str(start))
+        x_batch = []
+        y_batch = []
+        end = min(start + batch_size, len(subjects))
+        ids_train_batch = subjects[start:end]
+        for subject in ids_train_batch:
+            filedata = read_data(DATA_DIR + '/{}.a3d'.format(subject[0]))
+            preprocessed_data = crop_and_resize_3D(filedata)
+            mask_4_data = preprocessed_data[300:512, 0:256, 350:512]
+            mask_4 = scipy.ndimage.zoom(mask_4_data, (128/212.0, 95/256.0, 128/162.0))
+            mask_2_data = preprocessed_data[0:212, 0:256, 350:512]
+            mask_2 = scipy.ndimage.zoom(mask_2_data, (128/212.0, 95/256.0, 128/162.0))
+            if save_one == True:
+                save_to_vtk(mask_4, subject[0]+"_zone_4_mask")
+                save_to_vtk(mask_2, subject[0]+"_zone_2_mask")
+                save_one = False
+
+            with open('data3D/masks/4/{}_mask_4.pickle'.format(subject[0]), 'wb') as handle:
+                pickle.dump(mask_4, handle, protocol = pickle.HIGHEST_PROTOCOL)
+            with open('data3D/masks/2/{}_mask_2.pickle'.format(subject[0]), 'wb') as handle:
+                pickle.dump(mask_2, handle, protocol = pickle.HIGHEST_PROTOCOL)
+
+extract_zones()
 
 def preseg_generator(batch_size):
     zones = list(range(1,18))    
