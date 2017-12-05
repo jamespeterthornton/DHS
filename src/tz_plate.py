@@ -27,12 +27,16 @@ from keras.applications.inception_resnet_v2 import InceptionResNetV2
 from keras.backend.tensorflow_backend import set_session
 from keras.utils.np_utils import to_categorical
 
+from resnet import custom_resnet
+
 import random
 from timeit import default_timer as timer
 
 import time
-
+import pickle
 from logging_callback import LoggingCallback
+from zone_crops import get_zone_fs
+
 
 import tsahelper.tsahelper as tsa
 import scipy
@@ -118,6 +122,69 @@ def get_train_test_file_list():
     print('Train/Test Split -> {} file(s) of {} used for testing'.format( 
          len(SUBJECT_LIST) - train_test_split, len(SUBJECT_LIST)))
 
+def make_five_folds():
+    #{'tz': 9, 'use_fs': True}, 
+    tzs = [{'tz': 15, 'use_fs': True}, {'tz': 3, 'use_fs': True}, {'tz': 11, 'use_fs': True}, {'tz': 6, 'use_fs': True}, {'tz': 5, 'use_fs': True}, {'tz': 4, 'use_fs': True}]
+    for tz_dict in tzs:
+        tz = tz_dict['tz']
+        use_fs = tz_dict['use_fs']
+        top_path = 'plates/' + str(tz) + '/'
+        if use_fs == True:
+            top_path = 'plates/' + str(tz) + '/full_size/'
+        files_list = []
+        threats_list = []
+        non_threats_list = []
+        for dir_path in ['train/threats/', 'test/threats/']:
+            dir_list = os.listdir(top_path + dir_path)
+            threats_list = threats_list + dir_list
+            for filename in dir_list:
+                files_list.append(top_path+dir_path+filename)
+        for dir_path in ['train/non_threats/', 'test/non_threats/']:
+            dir_list = os.listdir(top_path + dir_path)
+            non_threats_list = non_threats_list + dir_list
+            for filename in dir_list:
+                files_list.append(top_path+dir_path+filename)
+        np.random.shuffle(files_list)
+        length = len(files_list)
+        fold_len = int(length/5)
+        final_fold = []
+        for subject_i in range(4*fold_len, len(files_list)):
+            final_fold.append(files_list[subject_i])
+        for fold_i in range(0, 5):
+            fold_path = top_path+"fold_" + str(fold_i)
+            print("huh.." + fold_path)
+            os.mkdir(fold_path)
+            files_in_fold = []
+            for subject_i in range(fold_i*fold_len, (fold_i+1)*fold_len):
+                files_in_fold.append(files_list[subject_i])
+            exclusion_list = files_in_fold + final_fold
+            for dir_path in ['train', 'test']:
+                for threat_status in ['threats', 'non_threats']:
+                    path = fold_path + "/" + dir_path + "/"
+                    try: 
+                        #Should happen regularly
+                        os.mkdir(path)
+                    except:
+                        print("Do nothing")
+                    path = path + threat_status + "/"
+                    os.mkdir(path)
+                    relevant_files = []
+                    if dir_path == 'test':
+                        relevant_files = files_in_fold
+                    else: 
+                        relevant_files = [x for x in files_list if x not in exclusion_list]
+                    relevant_list = non_threats_list 
+                    if threat_status == 'threats':
+                        relevant_list = threats_list
+                    for rel_file in relevant_files:
+                        parts = rel_file.split('/')
+                        sub_file = parts[len(parts)-1]
+                        if sub_file in relevant_list:
+                            sub_name = sub_file.split('.')[0]
+                            os.link(rel_file, path + sub_name + ".png")
+
+#make_five_folds()
+
 def get_lb_file_list():
     global LB_SUBJECT_LIST
     df = pd.read_csv(STAGE1_SAMPLE_SUB)
@@ -151,337 +218,6 @@ def get_threat_prob(t_zone, labels, subject):
             if zone == t_zone:
                 threat_prob = 1
     return threat_prob
-
-def get_zone15(img):
-    crops = []
-    for slice_num in range(0, len(img)):
-        if slice_num == 0:
-            crops.append(np.array(img[slice_num])[ 0:60, 0:128])
-        elif slice_num == 1:
-            crops.append(np.array(img[slice_num])[0:60, 0:128])
-        elif slice_num == 2:
-            crops.append(np.array(img[slice_num])[0:60, 0:128])
-        elif slice_num == 3:
-            crops.append(np.array(img[slice_num])[0:60, 0:160])
-        elif slice_num == 5:
-            crops.append(np.array(img[slice_num])[ 0:60,160:256])
-        elif slice_num == 6:
-            crops.append(np.array(img[slice_num])[ 0:60, 140:256])
-        elif slice_num == 7:
-            crops.append(np.array(img[slice_num])[ 0:60, 128:256])
-        elif slice_num == 8:
-            crops.append(np.array(img[slice_num])[ 0:60, 130:256])
-        elif slice_num == 9:
-            crops.append(np.array(img[slice_num])[ 0:60, 120:256])
-        elif slice_num == 10:
-            crops.append(np.array(img[slice_num])[ 0:60, 100:256])
-        elif slice_num == 11:
-            crops.append(np.array(img[slice_num])[ 0:60, 75:256])
-        elif slice_num == 12:
-            crops.append(np.array(img[slice_num])[ 0:60, 0:256])
-        elif slice_num == 13:
-            crops.append(np.array(img[slice_num])[ 0:60, 0:120])
-        elif slice_num == 14:
-            crops.append(np.array(img[slice_num])[ 0:60, 0:128])
-        elif slice_num == 15:
-            crops.append(np.array(img[slice_num])[ 0:60, 0:128])
-    return crops   
-
-def get_zone3(img):
-    crops = []
-    for slice_num in range(0, len(img)):
-        if slice_num == 0:
-            crops.append(np.array(img[slice_num])[200:315,150:256])
-        elif slice_num == 1:
-            crops.append(np.array(img[slice_num])[200:315,150:256])
-        elif slice_num == 2:
-            crops.append(np.array(img[slice_num])[200:315,150:256])
-        elif slice_num == 3:
-            crops.append(np.array(img[slice_num])[200:315,150:256])
-        elif slice_num == 4:
-            crops.append(np.array(img[slice_num])[200:315,55:205])
-        elif slice_num == 5:
-            crops.append(np.array(img[slice_num])[200:315,0:200])
-        elif slice_num == 6:
-            crops.append(np.array(img[slice_num])[200:315,0:155])
-        elif slice_num == 7:
-            crops.append(np.array(img[slice_num])[200:315,0:130])
-        elif slice_num == 8:
-            crops.append(np.array(img[slice_num])[200:315,0:110])
-        elif slice_num == 9:
-            crops.append(np.array(img[slice_num])[200:315,0:110])
-        elif slice_num == 10:
-            crops.append(np.array(img[slice_num])[200:315,0:110])
-        elif slice_num == 13:
-            crops.append(np.array(img[slice_num])[200:315,150:256])
-        elif slice_num == 14:
-            crops.append(np.array(img[slice_num])[200:315,150:256])
-        elif slice_num == 15:
-            crops.append(np.array(img[slice_num])[200:315,150:256])
-    return crops
-
-def get_zone9_fs(img):
-    crops = []
-    for slice_num in range(0, len(img)):
-        if slice_num == 0:
-            crops.append(np.array(img[slice_num])[160:380,160:352])
-        elif slice_num == 1:
-            crops.append(np.array(img[slice_num])[160:380,140:352])
-        elif slice_num == 2:
-            crops.append(np.array(img[slice_num])[160:380,90:352])
-        elif slice_num == 3:
-            crops.append(np.array(img[slice_num])[160:380,30:352])
-        elif slice_num == 6:
-            crops.append(np.array(img[slice_num])[160:380,160:512])
-        elif slice_num == 7:
-            crops.append(np.array(img[slice_num])[160:380,160:372])
-        elif slice_num == 8:
-            crops.append(np.array(img[slice_num])[160:380,160:352])
-        elif slice_num == 9:
-            crops.append(np.array(img[slice_num])[160:380,80:352])
-        elif slice_num == 10:
-            crops.append(np.array(img[slice_num])[160:380,0:312])
-        elif slice_num == 13:
-            crops.append(np.array(img[slice_num])[160:380,160:432])
-        elif slice_num == 14:
-            crops.append(np.array(img[slice_num])[160:380,160:372])
-        elif slice_num == 15:
-            crops.append(np.array(img[slice_num])[160:380,160:352])
-    return crops
-
-def get_zone9(img):
-    crops = []
-    for slice_num in range(0, len(img)):
-        if slice_num == 0:
-            crops.append(np.array(img[slice_num])[80:190,80:176])
-        elif slice_num == 1:
-            crops.append(np.array(img[slice_num])[80:190,70:176])
-        elif slice_num == 2:
-            crops.append(np.array(img[slice_num])[80:190,45:176])
-        elif slice_num == 3:
-            crops.append(np.array(img[slice_num])[80:190,15:176])
-        elif slice_num == 6:
-            crops.append(np.array(img[slice_num])[80:190,80:256])
-        elif slice_num == 7:
-            crops.append(np.array(img[slice_num])[80:190,80:186])
-        elif slice_num == 8:
-            crops.append(np.array(img[slice_num])[80:190,80:176])
-        elif slice_num == 9:
-            crops.append(np.array(img[slice_num])[80:190,40:176])
-        elif slice_num == 10:
-            crops.append(np.array(img[slice_num])[80:190,0:156])
-        elif slice_num == 13:
-            crops.append(np.array(img[slice_num])[80:190,80:216])
-        elif slice_num == 14:
-            crops.append(np.array(img[slice_num])[80:190,80:186])
-        elif slice_num == 15:
-            crops.append(np.array(img[slice_num])[80:190,80:176])
-    return crops
-
-def get_zone13(img):
-    crops = []
-    for slice_num in range(0, len(img)):
-        if slice_num == 0:
-            crops.append(np.array(img[slice_num])[15:100,0:128])
-        elif slice_num == 1:
-            crops.append(np.array(img[slice_num])[15:100,0:128])
-        elif slice_num == 2:
-            crops.append(np.array(img[slice_num])[15:100,0:148])
-        elif slice_num == 3:
-            crops.append(np.array(img[slice_num])[15:100,0:190])
-        elif slice_num == 5:
-            crops.append(np.array(img[slice_num])[15:100,160:256])
-        elif slice_num == 6:
-            crops.append(np.array(img[slice_num])[15:100,140:256])
-        elif slice_num == 7:
-            crops.append(np.array(img[slice_num])[15:100,128:256])
-        elif slice_num == 8:
-            crops.append(np.array(img[slice_num])[15:100,130:256])
-        elif slice_num == 9:
-            crops.append(np.array(img[slice_num])[15:100,120:256])
-        elif slice_num == 10:
-            crops.append(np.array(img[slice_num])[15:100,80:256])
-        elif slice_num == 11:
-            crops.append(np.array(img[slice_num])[15:100,35:256])
-        elif slice_num == 12:
-            crops.append(np.array(img[slice_num])[15:100,0:256])
-        elif slice_num == 13:
-            crops.append(np.array(img[slice_num])[15:100,0:120])
-        elif slice_num == 14:
-            crops.append(np.array(img[slice_num])[15:100,0:128])
-        elif slice_num == 15:
-            crops.append(np.array(img[slice_num])[15:100,0:128])
-    return crops
-
-def get_zone11(img):
-    crops = []
-    for slice_num in range(0, len(img)):
-        if slice_num == 0:
-            crops.append(np.array(img[slice_num])[40:150,0:128])
-        elif slice_num == 1:
-            crops.append(np.array(img[slice_num])[40:150,0:128])
-        elif slice_num == 2:
-            crops.append(np.array(img[slice_num])[40:150,0:148])
-        elif slice_num == 3:
-            crops.append(np.array(img[slice_num])[40:150,0:150])
-        elif slice_num == 5:
-            crops.append(np.array(img[slice_num])[40:150,100:192])
-        elif slice_num == 6:
-            crops.append(np.array(img[slice_num])[40:150,140:256])
-        elif slice_num == 7:
-            crops.append(np.array(img[slice_num])[40:150,128:256])
-        elif slice_num == 8:
-            crops.append(np.array(img[slice_num])[40:150,130:256])
-        elif slice_num == 9:
-            crops.append(np.array(img[slice_num])[40:150,120:256])
-        elif slice_num == 10:
-            crops.append(np.array(img[slice_num])[40:150,80:256])
-        elif slice_num == 11:
-            crops.append(np.array(img[slice_num])[40:150,35:192])
-        elif slice_num == 12:
-            crops.append(np.array(img[slice_num])[40:150,0:128])
-        elif slice_num == 13:
-            crops.append(np.array(img[slice_num])[40:150,0:120])
-        elif slice_num == 14:
-            crops.append(np.array(img[slice_num])[40:150,0:138])
-        elif slice_num == 15:
-            crops.append(np.array(img[slice_num])[40:150,0:138])
-    return crops
-
-def get_zone8(img):
-    crops = []
-    for slice_num in range(0, len(img)):
-        if slice_num == 0:
-            crops.append(np.array(img[slice_num])[85:180,0:128])
-        elif slice_num == 1:
-            crops.append(np.array(img[slice_num])[85:180,0:128])
-        elif slice_num == 2:
-            crops.append(np.array(img[slice_num])[85:180,0:148])
-        elif slice_num == 7:
-            crops.append(np.array(img[slice_num])[85:180,128:256])
-        elif slice_num == 8:
-            crops.append(np.array(img[slice_num])[85:180,130:256])
-        elif slice_num == 9:
-            crops.append(np.array(img[slice_num])[85:180,120:256])
-        elif slice_num == 10:
-            crops.append(np.array(img[slice_num])[85:180,80:256])
-        elif slice_num == 11:
-            crops.append(np.array(img[slice_num])[85:180,35:192])
-        elif slice_num == 12:
-            crops.append(np.array(img[slice_num])[85:180,0:128])
-        elif slice_num == 13:
-            crops.append(np.array(img[slice_num])[85:180,0:120])
-        elif slice_num == 14:
-            crops.append(np.array(img[slice_num])[85:180,0:138])
-        elif slice_num == 15:
-            crops.append(np.array(img[slice_num])[85:180,0:138])
-    return crops
-
-def get_zone6(img):
-    crops = []
-    for slice_num in range(0, len(img)):
-        if slice_num == 0:
-            crops.append(np.array(img[slice_num])[130:230,0:128])
-        elif slice_num == 1:
-            crops.append(np.array(img[slice_num])[130:230,0:128])
-        elif slice_num == 5:
-            crops.append(np.array(img[slice_num])[130:230,100:192])
-        elif slice_num == 6:
-            crops.append(np.array(img[slice_num])[130:230,140:256])
-        elif slice_num == 7:
-            crops.append(np.array(img[slice_num])[130:230,128:256])
-        elif slice_num == 8:
-            crops.append(np.array(img[slice_num])[130:230,130:256])
-        elif slice_num == 9:
-            crops.append(np.array(img[slice_num])[130:230,105:256])
-        elif slice_num == 10:
-            crops.append(np.array(img[slice_num])[130:230,65:256])
-        elif slice_num == 11:
-            crops.append(np.array(img[slice_num])[130:230,0:192])
-        elif slice_num == 12:
-            crops.append(np.array(img[slice_num])[130:230,0:128])
-        elif slice_num == 13:
-            crops.append(np.array(img[slice_num])[130:230,0:150])
-        elif slice_num == 14:
-            crops.append(np.array(img[slice_num])[130:230,0:150])
-        elif slice_num == 15:
-            crops.append(np.array(img[slice_num])[130:230,0:138])
-    return crops
-
-def get_zone4(img):
-    crops = []
-    for slice_num in range(0, len(img)):
-        if slice_num == 0:
-            crops.append(np.array(img[slice_num])[245:330,150:256])
-        elif slice_num == 1:
-            crops.append(np.array(img[slice_num])[245:330,150:256])
-        elif slice_num == 2:
-            crops.append(np.array(img[slice_num])[245:330,135:256])
-        elif slice_num == 3:
-            crops.append(np.array(img[slice_num])[245:330,20:192])
-        elif slice_num == 4:
-            crops.append(np.array(img[slice_num])[245:330,0:64])
-        elif slice_num == 5:
-            crops.append(np.array(img[slice_num])[245:330,0:64])
-        elif slice_num == 6:
-            crops.append(np.array(img[slice_num])[245:330,0:155])
-        elif slice_num == 7:
-            crops.append(np.array(img[slice_num])[245:330,0:130])
-        elif slice_num == 8:
-            crops.append(np.array(img[slice_num])[245:330,0:110])
-        elif slice_num == 9:
-            crops.append(np.array(img[slice_num])[245:330,0:110])
-        elif slice_num == 10:
-            crops.append(np.array(img[slice_num])[245:330,0:110])
-        elif slice_num == 13:
-            crops.append(np.array(img[slice_num])[245:330,128:256])
-        elif slice_num == 14:
-            crops.append(np.array(img[slice_num])[245:330,150:256])
-        elif slice_num == 15:
-            crops.append(np.array(img[slice_num])[245:330,150:256])
-    return crops
-
-def get_zone5(img):
-    crops = []
-    for slice_num in range(0, len(img)):
-        if slice_num == 0:
-            crops.append(np.array(img[slice_num])[185:260,46:210])
-        elif slice_num == 1:
-            crops.append(np.array(img[slice_num])[185:260,36:220])
-        elif slice_num == 2:
-            crops.append(np.array(img[slice_num])[185:260,0:210])
-        elif slice_num == 3:
-            crops.append(np.array(img[slice_num])[185:260,0:192])
-        elif slice_num == 13:
-            crops.append(np.array(img[slice_num])[185:260,25:192])
-        elif slice_num == 14:
-            crops.append(np.array(img[slice_num])[185:260,46:256])
-        elif slice_num == 15:
-            crops.append(np.array(img[slice_num])[185:260,46:256])
-    return crops   
-
-def get_zone(tz, cropped_ims):
-    if tz == 15:
-        return get_zone15(cropped_ims)
-    elif tz == 3:
-        return get_zone3(cropped_ims)
-    elif tz == 9:
-        return get_zone9(cropped_ims)
-    elif tz == 13:
-        return get_zone13(cropped_ims)
-    elif tz == 11:
-        return get_zone11(cropped_ims)
-    elif tz == 8:
-        return get_zone8(cropped_ims)
-    elif tz == 6:
-        return get_zone6(cropped_ims)
-    elif tz == 4:
-        return get_zone4(cropped_ims)
-    elif tz == 5:
-        return get_zone5(cropped_ims)
-    else:
-        print ("Get zone FAILURE!")
-        return None
  
 def switch_chest_back(image):
     temp_im = image
@@ -526,9 +262,9 @@ def flip_and_switch(image):
     return a
 
 #Update - TZ (top_dir), whether to switch and flip, get_zone, whether to resize, threat prob / path, dirs, sf, sub list
- 
-def preprocess_plates():
-    TOP_DIR = "plates/9/full_size/"
+def preprocess_plates(tz, flip_tz):
+    print ("preprocess plates for tz: " + str(tz) + " and: " + str(flip_tz))
+    TOP_DIR = "plates/" + str(tz) + "/full_size/"
     TRAIN_DIR_NAME = "train/"
     TEST_DIR_NAME = "test/"
     THREAT_DIR_NAME = "threats/"
@@ -565,8 +301,11 @@ def preprocess_plates():
                     try:
                         images = tsa.read_data(INPUT_FOLDER + '/' + subject + '.aps')
                         images = images.transpose()
-                        #images_to_use = switch_chest_back(images) if should_flip else images 
-                        images_to_use = flip_and_switch(images) if should_flip else images
+                        if tz == 5:
+                            #print ("Swap chest and back!")
+                            images_to_use = switch_chest_back(images) if should_flip else images 
+                        else:
+                            images_to_use = flip_and_switch(images) if should_flip else images
                         cropped_ims = []
                         for i in range(0, len(images_to_use)):
                             if i==3 or i==5 or i==11 or i==13:
@@ -578,34 +317,45 @@ def preprocess_plates():
                         #for i in range(0, len(cropped_ims)):
                         #    cropped_ims[i] = cv2.resize(cropped_ims[i], (0,0), fx=0.5, fy=0.5) 
                         #ims = scipy.ndimage.zoom(cropped_ims, (1, 0.5, 0.5))
-                        pre_stack = get_zone9_fs(cropped_ims)
+                        pre_stack = get_zone_fs(tz, cropped_ims)
                         stack = np.hstack(pre_stack)
                         path = TOP_DIR + folder + "/"
-                        #threat_prob_5 =  get_threat_prob(5, labels, subject)
-                        #threat_prob_17 =  get_threat_prob(17, labels, subject)
+                        threat_prob_0 =  get_threat_prob(tz, labels, subject)
+                        threat_prob_1 =  get_threat_prob(flip_tz, labels, subject)
                         #threat_prob_1 =  get_threat_prob(1, labels, subject)
                         #threat_prob_3 =  get_threat_prob(3, labels, subject)
-                        threat_prob_9 =  get_threat_prob(9, labels, subject)
+                        """threat_prob_9 =  get_threat_prob(9, labels, subject)
                         if threat_prob_9 == True:
                             path = path + THREAT_DIR_NAME
                         else:
-                            path = path + NON_THREAT_DIR_NAME
-                        """if threat_prob_5 == 1 and threat_prob_17 == 1:
+                            path = path + NON_THREAT_DIR_NAME"""
+                        if threat_prob_0 == 1 and threat_prob_1 == 1:
                             path = path + THREAT_DIR_NAME 
-                        elif should_flip and threat_prob_17 == 1:
+                        elif should_flip and threat_prob_1 == 1:
                             path = path + THREAT_DIR_NAME
-                        elif not should_flip and threat_prob_5 == 1:
+                        elif not should_flip and threat_prob_0 == 1:
                             path = path + THREAT_DIR_NAME
                         else:
-                            path = path + NON_THREAT_DIR_NAME"""
+                            path = path + NON_THREAT_DIR_NAME
                         scipy.misc.imsave(path + sub_name + ".jpg", stack)   
                     except:
+                        #time.sleep(5)
                         print ("Failed!!!")    
 
-preprocess_plates()
+
+#preprocess_plates(8, 10)
+
+#preprocess_plates(5, 17)
+#preprocess_plates(6, 7)
+#preprocess_plates(15, 16)
+
+#preprocess_plates(11, 12)
+#preprocess_plates(3, 1)
+#preprocess_plates(4, 2)
 
 def preprocess_lb_plates_for_tz(tz, flip_tz):
-    TOP_DIR = "lb_plates/" + str(tz) + "/ims/"
+    print("prep lb for zone - " + str(tz))
+    TOP_DIR = "lb_plates/" + str(tz) + "/full_size/ims/"
     get_lb_file_list()
     #list existing files so we can skip those
     files_list = os.listdir(TOP_DIR)
@@ -643,7 +393,8 @@ def preprocess_lb_plates_for_tz(tz, flip_tz):
                         images_to_use = flip_and_switch(images) if should_flip else images
                     cropped_ims = []
                     for i in range(0, len(images_to_use)):
-                        if tz in [15, 3, 9, 13]:
+                        if tz in [13]:
+                        #if tz in [9, 15, 3, 13]:
                             cropped_ims.append(crop_and_resize_2D(images_to_use[i]))
                         else:
                             if i==3 or i==5 or i==11 or i==13:
@@ -652,24 +403,27 @@ def preprocess_lb_plates_for_tz(tz, flip_tz):
                                 cropped_ims.append(crop_and_resize_2D(images_to_use[i], x_resize_ratio=0.5))
                             else:
                                 cropped_ims.append(crop_and_resize_2D(images_to_use[i]))
-                    for i in range(0, len(cropped_ims)):
-                        cropped_ims[i] = cv2.resize(cropped_ims[i], (0,0), fx=0.5, fy=0.5) 
-                    pre_stack = get_zone(tz, cropped_ims)
+                    #for i in range(0, len(cropped_ims)):
+                    #    cropped_ims[i] = cv2.resize(cropped_ims[i], (0,0), fx=0.5, fy=0.5) 
+                    pre_stack = get_zone_fs(tz, cropped_ims)
                     stack = np.hstack(pre_stack)
                     path = TOP_DIR + sub_name + ".jpg"
                     scipy.misc.imsave(path, stack)   
                 #except:
                 #    print ("Failed!!!")    
     print ("next!")
-"""preprocess_lb_plates_for_tz(15, 16)
-preprocess_lb_plates_for_tz(9, None)
-preprocess_lb_plates_for_tz(3, 1)
-preprocess_lb_plates_for_tz(13, 14)
+
+"""preprocess_lb_plates_for_tz(3, 1)
 preprocess_lb_plates_for_tz(11, 12)
-preprocess_lb_plates_for_tz(8, 10)
 preprocess_lb_plates_for_tz(6, 7)
 preprocess_lb_plates_for_tz(4, 2)
 preprocess_lb_plates_for_tz(5, 17)"""
+#preprocess_lb_plates_for_tz(15, 16)
+
+#preprocess_lb_plates_for_tz(9, None)
+"""preprocess_lb_plates_for_tz(15, 16)
+preprocess_lb_plates_for_tz(13, 14)
+preprocess_lb_plates_for_tz(8, 10)"""
 
 def convert_to_grayscale(img):
     # scale pixel values to grayscale
@@ -987,16 +741,21 @@ def MVCNN(weights_path=None):
 
     return full_model
 
-def tl_resnet50(input_size):
+"""def tl_resnet50(input_size):
     resnet_model_1 = ResNet50(weights='imagenet', include_top=False, input_shape=(input_size[0], input_size[1], 3))
+    #for i in range(0, len(resnet_model_1.layers)):
+    #    print ("layer " + str(i) + " is named: " + resnet_model_1.layers[i].name)
+    #89 and 90
     resnet_model_2 = ResNet50(weights=None, include_top=False, input_shape=(input_size[0], input_size[1], 3))
-    tl_output = resnet_model_1.get_layer('add_8')
-    model_2_input = resnet_model_2.get_layer('activation_25')
-    x = model_2_input(tl_output)
-    for layer in resnet_model_1:
+    tl_output = resnet_model_1.layers[89]
+    model_2_input = resnet_model_2.layers[90]
+    print('1')
+    x = model_2_input(tl_output.output)
+    print('2')
+    for layer in resnet_model_1.layers:
         layer.trainable = False
-    x = Dense(1, activation='sigmoid', name='prediction')(x)
-    model = Model(inputs=resnet_model.inputs, outputs=x)
+    net = Dense(1, activation='sigmoid', name='prediction')(resnet_model_2.output)
+    model = Model(inputs=resnet_model_1.inputs, outputs=net)
     sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.7, nesterov=True)
     model.compile(loss='binary_crossentropy',
                   optimizer=sgd,
@@ -1004,17 +763,19 @@ def tl_resnet50(input_size):
 
     model.summary()
 
-    return model
+    return model"""
 
+#tl_resnet50((197, 1000))
 
 def resnet50(input_size):
-    resnet_model = ResNet50(weights=None, include_top=False, input_shape=(input_size[0], input_size[1], 3))
+    resnet_model = ResNet50(weights='imagenet', include_top=False, input_shape=(input_size[0], input_size[1], 3))
     x = resnet_model.output
     x = Flatten()(x)
-    """x = Dense(1024, activation='linear', name='fc1')(x)
+    x = Dense(1024, activation='linear', name='fc1')(x)
     x = LeakyReLU(alpha=0.1)(x)
-    x = Dropout(0.25)(x)
-    x = Dense(512, activation='linear', name='fc2')(x)
+    #x = BatchNormalization()(x)
+    #x = Dropout(0.15)(x)
+    """x = Dense(512, activation='linear', name='fc2')(x)
     x = LeakyReLU(alpha=0.1)(x)
     x = Dropout(0.25)(x)
     x = Dense(256, activation='linear', name='fc3')(x)
@@ -1027,12 +788,7 @@ def resnet50(input_size):
     model.compile(loss='binary_crossentropy',
                   optimizer=sgd,
                   metrics=['accuracy'])
-
-    model.summary()
-
     return model
-
-
 
 def res_plate(input_size):
     #base_model = VGG16(weights='imagenet', include_top=False, input_shape=(input_size[0], input_size[1], 3))
@@ -1381,8 +1137,8 @@ def train_binary_net():
     """
 #train_binary_net()
 
-def train_plate_net(tz):
-    
+def train_plate_net(tz, fold):
+    print('train plate net for tz: ' + str(tz))
     get_train_test_file_list()
     batch_size = 4
     #train_gen = plate_generator(TRAIN_SUBJECT_LIST, batch_size)
@@ -1391,8 +1147,16 @@ def train_plate_net(tz):
     #test_steps = np.ceil(float(len(TEST_SUBJECT_LIST)) / float(batch_size))
     #train_steps = np.ceil(float(189) / float(batch_size))
     #test_steps = np.ceil(float(45) / float(batch_size))
-    INPUT_SHAPES = {15: (197, 2115), 3: (197, 1707), 9: (197, 1502), 13: (197, 2225), 11: (197, 2009), 
-        8: (197, 1651), 6: (197, 1818), 4: (197, 1524), 5: (197, 1337)}
+    
+    #Fix this to avoid resizing
+    #INPUT_SHAPES = {15: (197, 2115), 3: (197, 1707), 9: (197, 1502), 13: (197, 2225), 11: (197, 2009), 
+    #    8: (197, 1651), 6: (197, 1818), 4: (197, 1524), 5: (197, 1337)}
+
+
+    INPUT_SHAPES = {15: (197, 2115), 3: (220, 2200), 9: (220, 2000), 13: (197, 2225), 11: (197, 2009), 
+        8: (197, 1651), 6: (197, 1818), 4: (197, 2000), 5: (197, 1337)}
+
+    
     #INPUT_SHAPES = {15: (139, 2115), 3: (139, 1707), 9: (139, 1502), 13: (139, 2225), 11: (139, 2009), 8: (139, 1651), 6: (139, 1818),
     #    4: (139, 1524), 5: (139, 1337)}
     INPUT_SIZE = INPUT_SHAPES[tz]
@@ -1403,68 +1167,73 @@ def train_plate_net(tz):
     #train_gen = ImageDataGenerator(width_shift_range=0.03, height_shift_range=0.3, zoom_range=0.1)
     test_gen = ImageDataGenerator()
 
-    model_name = "resnet_no_weights.h5"
+    model_name = "resnet50_1024_fs_no_d_" + fold + "_round_2.h5"
 
     checkpoint1_path = "weights/plate_models/" + str(tz) +"/" + model_name
-
+    momentum_path = checkpoint1_path + "_momentum.pickle"
     #model = res_plate(INPUT_SIZE)
     model = resnet50(INPUT_SIZE)
-    #model.load_weights("weights/plate_models/" + str(tz) +"/best_resnet50_aug_bs_4.h5")
+    #model = custom_resnet(INPUT_SIZE)
+    #model.load_weights("weights/plate_models/" + str(tz) +"/resnet50_1024_fs_drop_15_bn.h5")
 
     cnn_checkpoint = ModelCheckpoint(checkpoint1_path, monitor='val_loss', verbose=1, save_best_only=True, mode='min')
-    es = EarlyStopping('val_loss', patience=14, mode="min")
-    lc = LoggingCallback('resnet_1_tz_' + str(tz), net_name=str(tz)+model_name)
+    es = EarlyStopping('val_loss', patience=8, mode="min")
+    lc = LoggingCallback('resnet_1_tz_' + str(tz), momentum_path, net_name=str(tz)+model_name)
 
-    print ("low init LR")
-    sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.7, nesterov=True)
+    """print ("low init LR")
+    sgd = keras.optimizers.SGD(lr=0.0001, decay=1e-6, momentum=0.7, nesterov=True)
     model.compile(loss='binary_crossentropy',
                   optimizer=sgd,
                   metrics=['accuracy'])
 
     #model.fit_generator(generator=train_gen, validation_data=test_gen, steps_per_epoch = train_steps, validation_steps = test_steps, 
     #    epochs = 1000, verbose=2, callbacks=[cnn_checkpoint])
-    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 1, verbose=2, callbacks=[cnn_checkpoint, es, lc]) 
+    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/full_size/train", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/full_size/test", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 1, verbose=2, callbacks=[cnn_checkpoint, lc]) """
     
-    """time.sleep(90)
-    print ("increasing LR")
+    #time.sleep(90)
+    print ("increasing LR yo")
     sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.7, nesterov=True)
     model.compile(loss='binary_crossentropy',
                   optimizer=sgd,
                   metrics=['accuracy'])
-
-    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[cnn_checkpoint, es, lc])
-    """
+    #model.optimizer.get_state()
+    try:
+        model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/full_size/" + fold + "/train", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE, follow_links=True), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/full_size/" + fold + "/test", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE, follow_links=True), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[cnn_checkpoint, es, lc])
+    except:
+        print("onwards!") 
     #model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/train", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/test", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[cnn_checkpoint, es, lc])
     """
     time.sleep(90)
+    """
     model.load_weights(checkpoint1_path)
+    #momentum = pickle.load(momentum_path)
+    #model.optimizer.set_state(momentum)
+
+    #Should I consider doing one epoch at a super low er to set the momentum correctly?
     print ("back to low LR")
+    es2 = EarlyStopping('val_loss', patience=6, mode="min")
     sgd = keras.optimizers.SGD(lr=0.0001, decay=1e-6, momentum=0.7, nesterov=True)
     model.compile(loss='binary_crossentropy',
                   optimizer=sgd,
                   metrics=['accuracy'])
-    checkpoint2 = ModelCheckpoint("weights/plate_models/" + str(tz) +"/best_resnet_exp_low_lr.h5", monitor='val_loss', verbose=1, save_best_only=True, mode='min')
+    checkpoint2 = ModelCheckpoint("weights/plate_models/" + str(tz) +"/resnet_finetune_" + fold + ".h5", monitor='val_loss', verbose=1, save_best_only=True, mode='min')
     
-    model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/preproc/train", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/preproc/test", class_mode="binary", batch_size=1, target_size=INPUT_SIZE), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[checkpoint2, es, lc])
-    time.sleep(90)
-    """
+    #model.fit_generator(generator=train_gen.flow_from_directory("plates/" + str(tz) + "/full_size/" + fold + "/train", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE, follow_links=True), validation_data=test_gen.flow_from_directory("plates/" + str(tz) + "/full_size/" + fold + "/test", class_mode="binary", batch_size=batch_size, target_size=INPUT_SIZE, follow_links=True), steps_per_epoch = 1500, validation_steps = 458, epochs = 40, verbose=2, callbacks=[checkpoint2, es2, lc])
+    #time.sleep(90)
 
 def train_plate_nets():
     print("train plate nets")
-    #15 already complete[3, 9, 13, 11, [8, 6, 4, 5
-    #9
-    #change to dictionary w/ the name of the best network
-    for tz in [9, 4, 15, 3, 11, 5, 8, 6, 13]:
-        if True:#try: 
-            train_plate_net(tz)
-            
-        #except:
-        #    print("Failed!")
-        #    time.sleep(400)
+    for tz in [15, 5, 3, 9, 11, 6, 4]:#, 8, 13]:
+        for fold in ['fold_0', 'fold_1', 'fold_2', 'fold_3']:
+            try: 
+                train_plate_net(tz, fold)
+            except:
+                print("Failed!")
+                time.sleep(15)
         K.clear_session()
         time.sleep(30)
 
-#train_plate_nets()
+train_plate_nets()
 
 INPUT_SHAPES = {15: (139, 2115), 3: (139, 1707), 9: (139, 1502), 13: (139, 2225), 11: (139, 2009), 8: (139, 1651), 6: (139, 1818),
         4: (139, 1524), 5: (139, 1337)}
@@ -1474,48 +1243,125 @@ SHAPES_TO_USE = {15: (139, 2115), 3: (197, 1707), 9: (197, 1502), 13: (197, 2225
         8: (197, 1651), 6: (197, 1818), 4: (197, 1524), 5: (197, 1337)}
 
 def get_models_dict():
-    tz_15_model_1 = res_plate(INPUT_SHAPES[15])
-    tz_15_model_1.load_weights("weights/plate_models/15/best_resnet_exp_1.h5")
 
-    tz_3_model_1 = resnet50(INPUT_SHAPES_50[3])
-    tz_3_model_1.load_weights("weights/plate_models/3/best_resnet50_dropout_2.h5")
+    #INPUT_SHAPES = {15: (197, 2115), 3: (220, 2200), 9: (220, 2000), 13: (197, 2225), 11: (197, 2009), 
+    #    8: (197, 1651), 6: (197, 1818), 4: (197, 2000), 5: (197, 1337)}
 
-    tz_9_model_1 = resnet50(INPUT_SHAPES_50[9])
-    tz_9_model_1.load_weights("weights/plate_models/9/best_resnet_50_leaky.h5")
+    #Commented out models correspond to the appropriate shape from:
+    #INPUT_SHAPES_50 = {15: (197, 2115), 3: (197, 1707), 9: (197, 1502), 13: (197, 2225), 11: (197, 2009), 
+    #    8: (197, 1651), 6: (197, 1818), 4: (197, 1524), 5: (197, 1337)}
 
-    tz_13_model_1 = resnet50(INPUT_SHAPES_50[13])
-    tz_13_model_1.load_weights("weights/plate_models/13/best_resnet50_dropout_2.h5")
-
-    tz_11_model_1 = resnet50(INPUT_SHAPES_50[11])
-    tz_11_model_1.load_weights("weights/plate_models/11/best_resnet50_dropout_2.h5")
-
-    tz_8_model_1 = resnet50(INPUT_SHAPES_50[8])
-    tz_8_model_1.load_weights("weights/plate_models/8/best_resnet50_dropout_2.h5")
-
-    tz_6_model_1 = resnet50(INPUT_SHAPES_50[6])
-    tz_6_model_1.load_weights("weights/plate_models/6/best_resnet50_dropout_2.h5")
-
-    tz_4_model_1 = resnet50(INPUT_SHAPES_50[4])
-    tz_4_model_1.load_weights("weights/plate_models/4/best_resnet50_dropout_2.h5")
-
-    tz_5_model_1 = resnet50(INPUT_SHAPES_50[5])
-    tz_5_model_1.load_weights("weights/plate_models/5/best_resnet50_dropout_2.h5")
+    SHAPE_15_1 = (197, 2115)
+    #tz_15_model_1 = res_plate(SHAPE_15_1)
+    tz_15_model_1 = resnet50(SHAPE_15_1)
+    #tz_15_model_1.load_weights("weights/plate_models/15/best_resnet_exp_1.h5")
+    tz_15_model_1.load_weights("weights/plate_models/15/resnet50_1024_fs_no_d_197xN.h5")
+    tz_15_dict_1 = {"model": tz_15_model_1, "shape": SHAPE_15_1, "use_fs": True}
     
+    #Should this be the original 197 size or 220x?
+    SHAPE_3_1 = (220, 2200)
+    tz_3_model_1 = resnet50(SHAPE_3_1)
+    #tz_3_model_1.load_weights("weights/plate_models/3/best_resnet50_dropout_2.h5")
+    tz_3_model_1.load_weights("weights/plate_models/3/resnet50_1024_fs_drop_15.h5")
+    tz_3_dict_1 = {"model": tz_3_model_1, "shape": SHAPE_3_1, "use_fs" : True}
+
+    SHAPE_9_1 = (220, 2000)
+    tz_9_model_1 = resnet50(SHAPE_9_1)
+    #tz_9_model_1.load_weights("weights/plate_models/9/resnet50_1024_full-size-ims.h5")    
+    tz_9_model_1.load_weights("weights/plate_models/9/resnet50_1024_fs_no_d_197xN.h5")    
+    tz_9_dict_1 = {"model": tz_9_model_1, "shape": SHAPE_9_1, "use_fs" : True}
+
+    SHAPE_13_1 = (197, 2225)
+    tz_13_model_1 = resnet50(SHAPE_13_1)
+    tz_13_model_1.load_weights("weights/plate_models/13/best_resnet50_dropout_2.h5")
+    tz_13_dict_1 = {"model": tz_13_model_1, "shape": SHAPE_13_1, "use_fs" : False}
+
+    SHAPE_11_1 = (197, 2009)
+    tz_11_model_1 = resnet50(SHAPE_11_1)
+    tz_11_model_1.load_weights("weights/plate_models/11/resnet_finetune.h5")
+    tz_11_dict_1 = {"model": tz_11_model_1, "shape": SHAPE_11_1, "use_fs" : True}
+
+    SHAPE_8_1 = (197, 1651)
+    tz_8_model_1 = resnet50(SHAPE_8_1)
+    tz_8_model_1.load_weights("weights/plate_models/8/best_resnet50_dropout_2.h5")
+    tz_8_dict_1 = {"model": tz_8_model_1, "shape": SHAPE_8_1, "use_fs" : False}
+
+    SHAPE_6_1 = (197, 1818)
+    tz_6_model_1 = resnet50(SHAPE_6_1)
+    #tz_6_model_1.load_weights("weights/plate_models/6/best_resnet50_dropout_2.h5")
+    tz_6_model_1.load_weights("weights/plate_models/6/resnet50_1024_fs_no_d_197xN.h5")
+    tz_6_dict_1 = {"model": tz_6_model_1, "shape": SHAPE_6_1, "use_fs" : True}
+
+    SHAPE_4_1 = (197, 2000)
+    tz_4_model_1 = resnet50(SHAPE_4_1)
+    #tz_4_model_1.load_weights("weights/plate_models/4/best_resnet50_dropout_2.h5")
+    tz_4_model_1.load_weights("weights/plate_models/4/resnet_finetune.h5")
+    tz_4_dict_1 = {"model": tz_4_model_1, "shape": SHAPE_4_1, "use_fs" : True}
+
+    SHAPE_5_1 = (197, 1337)
+    tz_5_model_1 = resnet50(INPUT_SHAPES_50[5])
+    #tz_5_model_1.load_weights("weights/plate_models/5/best_resnet50_dropout_2.h5")
+    tz_5_model_1.load_weights("weights/plate_models/5/resnet_finetune.h5")
+    tz_5_dict_1 = {"model": tz_5_model_1, "shape": SHAPE_5_1, "use_fs" : True}
+ 
     tz_models_dict = {
-        15: [tz_15_model_1],
-        3: [tz_3_model_1],
-        9: [tz_9_model_1],
-        13: [tz_13_model_1],
-        11: [tz_11_model_1],
-        8: [tz_8_model_1],
-        6: [tz_6_model_1],
-        4: [tz_4_model_1],
-        5: [tz_5_model_1]
+        15: [tz_15_dict_1],
+        3: [tz_3_dict_1],
+        9: [tz_9_dict_1],
+        13: [tz_13_dict_1],
+        11: [tz_11_dict_1],
+        8: [tz_8_dict_1],
+        6: [tz_6_dict_1],
+        4: [tz_4_dict_1],
+        5: [tz_5_dict_1]
     }
 
     return tz_models_dict
 
-def predict_plates2():
+
+def get_fold_models_dict():
+
+
+    #Commented out models correspond to the appropriate shape from:
+    #INPUT_SHAPES_50 = {15: (197, 2115), 3: (197, 1707), 9: (197, 1502), 13: (197, 2225), 11: (197, 2009), 
+    #    8: (197, 1651), 6: (197, 1818), 4: (197, 1524), 5: (197, 1337)}
+
+    SHAPE_8_1 = (197, 1651)
+    tz_8_model_1 = resnet50(SHAPE_8_1)
+    tz_8_model_1.load_weights("weights/plate_models/8/best_resnet50_dropout_2.h5")
+    tz_8_dict_1 = {"model": tz_8_model_1, "shape": SHAPE_8_1, "use_fs" : False}
+    
+    SHAPE_13_1 = (197, 2225)
+    tz_13_model_1 = resnet50(SHAPE_13_1)
+    tz_13_model_1.load_weights("weights/plate_models/13/best_resnet50_dropout_2.h5")
+    tz_13_dict_1 = {"model": tz_13_model_1, "shape": SHAPE_13_1, "use_fs" : False}
+
+    tz_models_dict = {
+        15: [],
+        3: [],
+        9: [],
+        13: [tz_13_dict_1],
+        11: [],
+        8: [tz_8_dict_1],
+        6: [],
+        4: [],
+        5: []
+    }
+    
+    INPUT_SHAPES = {15: (197, 2115), 3: (220, 2200), 9: (220, 2000), 13: (197, 2225), 11: (197, 2009), 
+        8: (197, 1651), 6: (197, 1818), 4: (197, 2000), 5: (197, 1337)}
+
+    for fold in [0,1,2,3]:
+        for tz in [15, 3, 9, 11, 6, 4, 5]:
+            model_name = "weights/plate_models/" + str(tz) + "/resnet50_1024_fs_no_d_fold_" + fold + ".h5"
+            model_shape = INPUT_SHAPES[tz]
+            model = resnet50(model_shape)
+            model.load_weights(model_name)
+            model_dict = {"model":model, "shape":model_shape, "use_fs":True}
+            tz_models_dict[tz].append(model_dict)
+    return tz_models_dict
+
+def predict_plates():
     print ("predictin...")
     sub_file = open("labels/resnet_sub_1_2.csv", "w")
     sub_file.write("Id,Probability\n")
@@ -1523,20 +1369,30 @@ def predict_plates2():
 
     models_dict = get_models_dict()
 
-    for tz in [15, 3, 9, 13, 11, 8, 6, 4, 5]:
+    for tz in [9, 15, 3, 13, 11, 8, 6, 4, 5]:
         print("Tz: " + str(tz))
-        model = models_dict[tz][0]
+        predictions = []
+  
+        for model_dict in models_dict[tz]:
 
-        dir_path = "lb_plates/" + str(tz) 
-        plate_files = os.listdir(dir_path + "/ims")
+        model = models_dict[tz][0]['model']
+        input_shape = models_dict[tz][0]['shape']
+        use_fs = models_dict[tz][0]['use_fs']
+
+        dir_path = "lb_plates/" + str(tz) + "/ims"
+        if use_fs == True:
+            dir_path = "lb_plates/" + str(tz) + "/full_size/ims"
+
+
+        plate_files = os.listdir(dir_path)
         #print(plate_files[:10])
         i = 0
         for plate_file in plate_files:
             if i % 20 == 0:
                 print (str(i))
-            plate = np.asarray(Image.open(dir_path + "/ims/" + plate_file).convert("RGB"))
+            plate = np.asarray(Image.open(dir_path + "/" + plate_file).convert("RGB"))
             #print("1")
-            plate = scipy.ndimage.zoom(plate, (SHAPES_TO_USE[tz][0]/plate.shape[0], 1, 1))
+            plate = scipy.ndimage.zoom(plate, (input_shape[0]/plate.shape[0], input_shape[1]/plate.shape[1], 1))
             #print("2")
             #plate = plate.reshape((plate.shape[1], plate.shape[0], plate.shape[2]))
             #print("3")
@@ -1555,52 +1411,10 @@ def predict_plates2():
             sub_file.write(plate_name + ", " + str(predictions[0][0]) + "\n")
             #print("10")
             i = i + 1
-
             #print(dir_path)
             #steps_count = len(plate_files) -1
 
-#predict_plates2()
-
-def predict_plates():
-    print ("predictin...")
-    sub_file = open("labels/resnet_sub_1_1.csv", "w")
-    sub_file.write("Id,Probability\n")
-    INPUT_SHAPES = {15: (139, 2115), 3: (139, 1707), 9: (139, 1502), 13: (139, 2225), 11: (139, 2009), 8: (139, 1651), 6: (139, 1818),
-        4: (139, 1524), 5: (139, 1337)}
-    #INPUT_SHAPES = {15: (2115, 60), 3: (1707, 115), 9: (1502, 110), 13: (2225, 85), 11: (2009, 110), 8: (1651, 95), 6: (1818, 100),
-    #    4: (1524, 85), 5: (1337, 75)}
-    pred_gen = ImageDataGenerator()
-    for tz in [15]:#, 3, 9, 13, 11, 8, 6, 4, 5]:
-        model = res_plate(INPUT_SHAPES[tz])
-        model.load_weights("weights/plate_models/" + str(tz) + "/best_resnet.h5")
-        dir_path = "lb_plates/" + str(tz) 
-        plate_files = os.listdir(dir_path + "/ims")
-        print(plate_files[:5])
-        print(plate_files[-5:])
-        i = 0
-        if True: #for plate_file in plate_files:
-            """plate = np.asarray(Image.open(dir_path + "/" + plate_file).convert("RGB"))
-            plate = plate.reshape((plate.shape[1], plate.shape[0], plate.shape[2]))
-            plate_name = plate_file.split(".")[0]
-            plate_array = []
-            plate_array.append(plate)
-            x = np.array(plate_array)"""
-            #print(dir_path)
-            #steps_count = len(plate_files) -1
-
-            gen = pred_gen.flow_from_directory(dir_path, class_mode=None, shuffle=False, target_size=INPUT_SHAPES[tz], batch_size=1, save_to_dir="plates/pred_plates")
-            for i in range(0, 5):
-                print (next(gen))
-
-            classifications = model.predict_generator(pred_gen.flow_from_directory(dir_path, class_mode=None, shuffle=False, target_size=INPUT_SHAPES[tz], batch_size=1, save_to_dir="plates/pred_plates"), steps=5) #len(plate_files))
-            print (len(classifications))
-            classifications = np.clip(classifications, 0.05, 0.95)
-            for i in range(0, len(classifications)):
-                #print(plate_files[i].split(".")[0] + ", " + str(classifications[i][0]) + "\n")
-                sub_file.write(plate_files[i].split(".")[0] + ", " + str(classifications[i][0]) + "\n")
-                i = i + 1
-
-#predict_plates2()
+#predict_plates()
 
 def evaluate_plates():
     print("evaluate")
@@ -1608,20 +1422,22 @@ def evaluate_plates():
 
     models_dict = get_models_dict()
 
+    print('got model')
+
     for tz in [15, 9, 3, 13, 11, 8, 6, 4, 5]:
-        model = models_dict[tz][0]
-        plates_dir = "plates/" + str(tz) + "/test"
+        model = models_dict[tz][0]['model']
+        input_shape = models_dict[tz][0]['shape']
+        use_fs = models_dict[tz][0]['use_fs'] 
+        print("use fs: " + str(use_fs) + " and tz... " + str(tz))
+        plates_dir = "plates/" + str(tz) + "/test" 
+        if use_fs == True:
+            plates_dir = "plates/" + str(tz) + "/full_size/test"
         plates = os.listdir(plates_dir + "/threats") + os.listdir(plates_dir+"/non_threats")
         batch_size = 4
         print(len(plates))
         print ("TZ: " + str(tz))
         print(model.metrics_names)
-        try:
-            print("normal shapes")
-            print(model.evaluate_generator(pred_gen.flow_from_directory(plates_dir, class_mode="binary", batch_size=4, target_size=INPUT_SHAPES[tz]), steps=len(plates)/batch_size))
-        except:
-            print("50 shapes")
-            print(model.evaluate_generator(pred_gen.flow_from_directory(plates_dir, class_mode="binary", batch_size=4, target_size=INPUT_SHAPES_50[tz]), steps=len(plates)/batch_size))
+        print(model.evaluate_generator(pred_gen.flow_from_directory(plates_dir, class_mode="binary", batch_size=4, target_size=input_shape), steps=len(plates)/batch_size))
 
 #evaluate_plates()
 
