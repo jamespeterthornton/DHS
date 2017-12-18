@@ -28,7 +28,13 @@ import sys
 import os
 from pyevtk.hl import gridToVTK
 import pickle
+import time
+import pycuda.driver as cuda
+import pycuda.autoinit
+import time
+from pycuda.compiler import SourceModule
 
+from res_model_3D import build_model
 from unet_3d import unet_model_3d, dice_coef, dice_coef_loss
 
 TEST_FILE_PATH = "stage1_a3d/0a27d19c6ec397661b09f7d5998e0b14.a3d"
@@ -546,6 +552,9 @@ def get_files_and_zones(labels_df):
                 files_and_zones[filename].append(zone)
     return files_and_zones
 
+# This is a weird way to do it in the general 3D CNN context. I believe 
+# I originally wrote this for a different alg it was more applicable to
+# But - with a week left in the comp - whether to refactor will be determined by necessity
 def dataset_for_threat_zones(threat_zones, equivalent_zones=None):
     labels_df = get_subject_labels()
     files_and_zones = get_files_and_zones(labels_df)
@@ -570,6 +579,69 @@ def dataset_for_threat_zones(threat_zones, equivalent_zones=None):
         return threat_subjects, non_threat_subjects
 
 def crop_and_resize_3D(data):
+    init_max_array = np.array([0, 512, 0, 512, 0, 660])    
+    init_max_array = init_max_array.astype(np.int32)
+    data_gpu = cuda.mem_alloc(data.nbytes)
+    cuda.memcpy_htod(data_gpu, data)
+    #max x, min x, max y, min y, max z, min z
+    result_gpu = cuda.mem_alloc(init_max_array.nbytes)
+    cuda.memcpy_htod(result_gpu, init_max_array)
+    print ("0")
+
+    #results = init_max_array;
+    
+    mod = SourceModule("""
+        __global__ void get_max_array(float data[512][512][660], int results[6])
+        {   
+            for (int x = 0; x < 512; x++) {
+                for (int y = 0; y < 512; y++) {
+                    for (int z =0; z < 660; z++) {
+                        if (data[x][y][z] > 0.25) {
+                            if (x > results[0]) {results[0] = x;}
+                            if (x < results[1]) {results[1] = x;}
+                            if (y > results[2]) {results[2] = y;}
+                            if (y < results[3]) {results[3] = y;}
+                            if (z > results[4]) {results[4] = z;}
+                            if (z < results[5]) {results[5] = z;}
+                        }
+                    }
+                }
+            }
+        }
+    """)
+    print("1")
+    func = mod.get_function("get_max_array")
+    print("2")
+    result = np.empty_like(init_max_array)
+    print("3")
+    func(cuda.InOut(data), cuda.InOut(init_max_array), block=(512,1,1), grid=(1, 1))
+    #func(data_gpu, result_gpu, block=(1024,1,1), grid=(1024, 1))
+    #cuda.memcpy_htod(result, result_gpu)
+    #print(result)
+    print(init_max_array)
+
+    result = init_max_array
+
+    #time.sleep(60)
+ 
+    max_x = result[0]
+    min_x = result[1]
+    max_y = result[2]
+    min_y = result[3]
+    max_z = result[4]
+    min_z = result[5]
+
+    cropped_data = data[min_x:max_x, min_y:max_y, min_z:max_z]                   
+
+    x_ratio = 512 / (max_x - min_x)
+    y_ratio = 256 / (max_y - min_y)
+    z_ratio = 512 / (max_z - min_z)
+
+    print ("ratios: " + str(x_ratio) + " " + str(y_ratio) + " " + str(z_ratio))
+
+    return scipy.ndimage.zoom(cropped_data, (x_ratio, y_ratio, z_ratio))
+
+def crop_and_resize_3D_cpu(data):
     max_x = 0
     min_x = 512
     max_y = 0
@@ -611,36 +683,52 @@ def test_crop_and_resize():
 
 def extract_zones():
     print("extracting zone 4")
+    SAVE_DIR = 'data3D/new_masks/4/'
+
     zones = list(range(1,18))    
     ts, non_ts = dataset_for_threat_zones(zones)
-    subjects = ts + non_ts    
+    print ("lens: " + str(len(ts)) + " " + str(len(non_ts)))
+    #time.sleep(60)
+    subjects = ts + non_ts 
+    subjects.sort()   
+    #for i in range(0, 5):
+    #    print (subjects[i])
+
     save_one = True
     batch_size = 1
+    
+    files_list = os.listdir(SAVE_DIR)
+    print (files_list[0])   
+    #time.sleep(60)
 
+ 
+    #for start in range(, len(subjects), batch_size):
     for start in range(0, len(subjects), batch_size):
-        print("we're on: " + str(start))
         x_batch = []
         y_batch = []
         end = min(start + batch_size, len(subjects))
         ids_train_batch = subjects[start:end]
         for subject in ids_train_batch:
-            filedata = read_data(DATA_DIR + '/{}.a3d'.format(subject[0]))
-            preprocessed_data = crop_and_resize_3D(filedata)
-            mask_4_data = preprocessed_data[300:512, 0:256, 350:512]
-            mask_4 = scipy.ndimage.zoom(mask_4_data, (128/212.0, 95/256.0, 128/162.0))
-            mask_2_data = preprocessed_data[0:212, 0:256, 350:512]
-            mask_2 = scipy.ndimage.zoom(mask_2_data, (128/212.0, 95/256.0, 128/162.0))
-            if save_one == True:
-                save_to_vtk(mask_4, subject[0]+"_zone_4_mask")
-                save_to_vtk(mask_2, subject[0]+"_zone_2_mask")
-                save_one = False
+            if '{}_mask_4.pickle'.format(subject[0]) not in files_list:
+                print("we're on: " + str(start) + " - " + str(subject))
+                filedata = read_data(DATA_DIR + '/{}.a3d'.format(subject[0]))
+                preprocessed_data = crop_and_resize_3D(filedata)
+                mask_4_data = preprocessed_data[300:512, 0:256, 350:512]
+                mask_4 = scipy.ndimage.zoom(mask_4_data, (128/212.0, 95/256.0, 128/162.0))
+                mask_2_data = preprocessed_data[0:212, 0:256, 350:512]
+                mask_2 = scipy.ndimage.zoom(mask_2_data, (128/212.0, 95/256.0, 128/162.0))
+                mask_2 = np.flip(mask_2, 0)
+                if save_one == True:
+                    save_to_vtk(mask_4, subject[0]+"_zone_4_gpu_mask")
+                    save_to_vtk(mask_2, subject[0]+"_zone_2_gpu_mask")
+                    save_one = False
+    
+                with open(SAVE_DIR + '{}_mask_4.pickle'.format(subject[0]), 'wb') as handle:
+                    pickle.dump(mask_4, handle, protocol = pickle.HIGHEST_PROTOCOL)
+                with open(SAVE_DIR + '{}_mask_2.pickle'.format(subject[0]), 'wb') as handle:
+                    pickle.dump(mask_2, handle, protocol = pickle.HIGHEST_PROTOCOL)
 
-            with open('data3D/masks/4/{}_mask_4.pickle'.format(subject[0]), 'wb') as handle:
-                pickle.dump(mask_4, handle, protocol = pickle.HIGHEST_PROTOCOL)
-            with open('data3D/masks/2/{}_mask_2.pickle'.format(subject[0]), 'wb') as handle:
-                pickle.dump(mask_2, handle, protocol = pickle.HIGHEST_PROTOCOL)
-
-extract_zones()
+#extract_zones()
 
 def preseg_generator(batch_size):
     zones = list(range(1,18))    
@@ -676,6 +764,52 @@ def preseg_generator(batch_size):
             y_batch = np.array(y_batch)
             yield x_batch, y_batch
 
+def preseg_generator2(batch_size):
+    #Written for zones 4 and 2
+    DATA_DIR = "data3D/new_masks/4/"
+    zones = list(range(1,18))    
+    ts, non_ts = dataset_for_threat_zones(zones)
+    subjects = ts + non_ts    
+    zone_subjects = []
+    for subject in subjects:
+        has_zone_2_threat = True if 2 in subject[1] else False
+        new_sub_2 = (subject[0], 2, has_zone_2_threat)
+        zone_subjects.append(new_sub_2)
+        has_zone_4_threat = True if 4 in subject[1] else False
+        new_sub_4 = (subject[0], 4, has_zone_2_threat)
+        zone_subjects.append(new_sub_4)
+        #print("sub: " + str(subject[0]) + " has z2 " + str(has_zone_2_threat) + " has z4 " + str(has_zone_4_threat))
+   
+    while True:
+        for start in range(0, len(zone_subjects), batch_size):
+            x_batch = []
+            y_batch = []
+            zeros_arr = []
+            o_fp = []
+            end = min(start + batch_size, len(zone_subjects))
+            ids_train_batch = zone_subjects[start:end]
+            for subject in ids_train_batch:
+                sub_name = subject[0]
+                sub_zone = subject[1]
+                has_threat = subject[2]
+                path = DATA_DIR + '{}_mask_{}.pickle'.format(sub_name, str(sub_zone))
+                #print(path)
+                with open(path, 'rb') as pickle_file:
+                    filedata = pickle.load(pickle_file)
+                data = np.array(filedata)
+                scaled_data = scipy.ndimage.zoom(data, (64.0/data.shape[0], 64.0/data.shape[1], 64.0/data.shape[2]))
+                x = np.reshape(scaled_data, (1, 64, 64, 64))
+                y = np.array([1]) if has_threat else np.array([0])
+                zeros_arr.append([0])
+                o_fp.append([0, 0, 0])
+                x_batch.append(x)
+                y_batch.append(y)
+            x_batch = np.array(x_batch)
+            y_batch = {'o_mal': np.array(y_batch), 'o_fp': np.array(o_fp), 'o_spic': np.array(zeros_arr), 
+                'o_lob': np.array(zeros_arr), 'o_d': np.array(zeros_arr)} 
+            yield x_batch, y_batch
+
+
 def test_unet():
     print("running unet")
     model = unet_model_3d(INPUT_SHAPE)
@@ -693,6 +827,7 @@ def test_unet():
  
     for filename in image_names:
         data = read_data('stage1_a3d/{}'.format(filename))
+        scaled_data = scipy.ndimage.zoom(data, (0.25, 0.25, 0.194))
         scaled_data = scipy.ndimage.zoom(data, (0.25, 0.25, 0.194))
         mask = unet_mask(scaled_data, filename)
         x = np.reshape(scaled_data, (128, 128, 128, 1))
@@ -725,50 +860,23 @@ def test_leg_unet():
     leg_gen = preseg_generator(1)
     log = model.fit_generator(leg_gen, 1, epochs=50000, verbose=2, callbacks=[unet_checkpoint], max_queue_size=1)
 
-test_leg_unet()
+#test_leg_unet()
 
-#leg_gen = preseg_generator(1)
-#next(leg_gen)
+def train_3D_resnet():
+    model = build_model((1, 64,64,64))
+    model.load_weights("weights/3D/model_LUNA_64_v29_14.h5")
+    unet_checkpoint = ModelCheckpoint("weights/3D/unet.h5", monitor='loss', verbose=1, save_best_only=True, mode='min')
+    from keras import backend as K
+    from keras.utils.conv_utils import convert_kernel
+    import tensorflow as tf
+    ops = []
+    for layer in model.layers:
+       if layer.__class__.__name__ in ['Convolution1D', 'Convolution2D', 'Convolution3D', 'AtrousConvolution2D']:
+          original_w = K.get_value(layer.W)
+          converted_w = convert_kernel(original_w)
+          ops.append(tf.assign(layer.W, converted_w).op)   
+    ps = preseg_generator2(4)
+    print("training 3D")
+    log = model.fit_generator(ps, 2000, epochs=500, verbose=2, callbacks=[unet_checkpoint], max_queue_size=1)
 
-
-
-
-
-
-
-#log = model_unet_3d().fit_generator(generator=generator(True), steps_per_epoch = 1, epochs = 1000, verbose=2)
-#log = get_sae().fit_generator(generator=generator(True), steps_per_epoch = 5, epochs = 1000, verbose=2, callbacks=[sae_checkpoint])
-
-
-"""
-cnn = load_model(CNN_PATH)
-cnn.compile(loss=keras.losses.categorical_crossentropy,
-        optimizer= keras.optimizers.SGD(lr=0.01))
-
-#cnn = get_cnn()
-gen = generator(False)
-x, y = next(gen)
-#y = [[1,0,0,0,0], [0,1,0,0,0], [0,0,1,0,0], [0,0,0,1,0], [0,0,0,0,1]]
-
-log = cnn.fit(x=x, y=y, batch_size=5, epochs=10000, verbose=2, callbacks=[cnn_checkpoint])
-
-
-predictions = cnn.predict(x)
-print(predictions)
-
-
-#print(cnn.summary())
-
-#log = cnn.fit_generator(generator=generator(False), steps_per_epoch = 1, epochs = 1000, verbose = 2, callbacks=[cnn_checkpoint])
-
-"""
-
-"""log = model.fit_generator(generator=train_generator(),
-                    steps_per_epoch=np.ceil(float(len(ids_train_split)) / float(batch_size)),
-                    epochs=1000,
-                    verbose=2,
-                    callbacks=callbacks,
-                    validation_data=valid_generator(),
-                    validation_steps=np.ceil(float(len(ids_valid_split)) / float(batch_size)))
-UNET_PATH)#
-"""
+train_3D_resnet()
