@@ -171,7 +171,6 @@ def get_zone13(img):
             crops.append(np.array(img[slice_num])[15:100,0:128])
     return crops
 
-#Incomplete
 def get_zone13_fs(img):
     crops = []
     for slice_num in range(0, len(img)):
@@ -463,7 +462,7 @@ def get_zone4_fs(img):
             crops.append(np.array(img[slice_num])[490:660,300:512])
     return crops
 
-# Note that this is not actually an accurate analog of the original get_zone9
+# Worth noting - this this is not actually an accurate analog of the original get_zone9
 # because when I wrote this function I didn't account for the x resize ratio on 
 # some images
 def get_zone9_fs(img):

@@ -23,7 +23,10 @@ class LoggingCallback(Callback):
         log_file = open(self.log_file_name, "a")
         log_file.write(msg)
         log_file.close()
-        """if logs['val_loss'] < self.best_val_loss:
+        """
+        Save Momentum - Apparently no longer supported by Keras
+ 
+        if logs['val_loss'] < self.best_val_loss:
             self.best_val_loss = logs['val_loss']
             print ("Saving momentum for val loss: " + str(logs['val_loss']))
             with open(SAVE_DIR + '{}_mask_4.pickle'.format(subject[0]), 'wb') as handle:
