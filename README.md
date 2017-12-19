@@ -1,5 +1,5 @@
 # DHS
-DHS Kaggle Comp
+Passenger Screening Kaggle Competition, hosted by the Department of Homeland Security
 
 19th place solution. 520 entrants (153 in stage 2). $1.5 million prize pool.
 
